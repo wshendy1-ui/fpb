@@ -69,16 +69,49 @@ const eq = (n, a, b) => { ck(n, JSON.stringify(a) === JSON.stringify(b));
   }
 }
 
+{
+  /* driver / inhibitor math on a hand-built record */
+  let pure2 = APP_JS.slice(0, APP_JS.indexOf("/* ================= [pure-end]"));
+  pure2 = pure2.replace('"use strict";', "").replace(/\bconst\b/g, "var").replace(/\blet\b/g, "var");
+  const c2 = vm.createContext({ Date, Math, JSON, Array, String, Infinity, isNaN, parseFloat });
+  vm.runInContext(pure2, c2);
+  const W = { tmax:0.8, rhmin:1.3, rhrec:1.0, wind:1.2, gust:0.8, pop:0.4, dryltg:1.1 };
+  const rec = { dl:[0,4], rows:{ tmax:[3,2], rhmin:[4,0], rhrec:[0,1], wind:[1,1], gust:[2,1], pop:[3,0] },
+                wx:{ tmax:[95,80], rhmin:[11,40], rhrec:[52,80], wind:[8,4], gust:[14,8], pop:[5,60], cape:[150,900], precip:[0,0.2] } };
+  const t0 = c2.topDrivers(rec, W, 0, 2);
+  eq("top2-day0", t0.map(d=>d.id), ["rhmin","tmax"]);               /* 5.2, 2.4 beat gust 1.6, pop 1.2 */
+  const t1 = c2.topDrivers(rec, W, 1, 2);
+  eq("top2-day1-dryltg", t1.map(d=>d.id), ["dryltg","tmax"]);       /* 4.4 dl, 1.6 tmax */
+  const inh = c2.inhibitor(rec, W, 1);
+  eq("inhibitor-day1", [inh.id, Math.round(inh.sc*10)/10], ["rhmin", 2.6]);  /* rhmin s0 w1.3 */
+  eq("inhibitor-skips-dryltg", c2.inhibitor({ dl:[0], rows:{ tmax:[2] } }, W, 0), null);
+  eq("drv-value", [c2.drvValueTxt("rhmin", rec, 0), c2.drvValueTxt("dryltg", rec, 1), c2.drvValueTxt("tmax", { }, 0)],
+                  ["11%", "CAPE 900", ""]);
+  eq("drivers-null-on-v1", c2.topDrivers({ t:[1], dl:[0] }, W, 0, 2), null);
+}
+
 /* ================= Layer 2 — jsdom boot smoke ================= */
 const DAYS = ["2026-07-15", "2026-07-16", "2026-07-17", "2026-07-18", "2026-07-19", "2026-07-20", "2026-07-21"];
 const FIX_RATINGS = {
-  schema: "fpb-national-1", generated: new Date().toISOString(), pointset_version: "poi-v1",
-  model: "gfs_seamless", days: DAYS,
+  schema: "fpb-national-2", generated: new Date().toISOString(), pointset_version: "poi-v1",
+  model: "gfs_seamless", days: DAYS, ladder: "v83-normalT2",
+  weights: { tmax:0.8, rhmin:1.3, rhrec:1.0, wind:1.2, gust:0.8, pop:0.4, dryltg:1.1 },
   zones: {
-    ORZ693: { t: [2, 3, 4, 1, 0, 2, 3], s: [1.5, 2.2, 3.4, 0.9, 0.4, 1.5, 2.1], dl: [0, 0, 4, 0, 0, 0, 0], drv: ["rhmin", "tmax", "dryltg", "", "", "rhmin", "wind"] },
-    WYZ275: { t: [1, 1, 2, 2, 3, 2, 1], s: [0.9, 1.0, 1.6, 1.7, 2.3, 1.6, 1.1], dl: [0, 0, 0, 0, 3, 0, 0], drv: ["", "", "", "", "gust", "", ""] }
+    ORZ693: { t: [2, 3, 4, 1, 0, 2, 3], s: [1.5, 2.2, 3.4, 0.9, 0.4, 1.5, 2.1], dl: [0, 0, 4, 0, 0, 0, 0],
+      drv: ["rhmin", "tmax", "dryltg", "", "", "rhmin", "wind"],
+      rows: { tmax:  [3, 3, 4, 1, 1, 2, 3],
+              rhmin: [4, 3, 4, 1, 0, 2, 3],
+              rhrec: [2, 2, 3, 1, 1, 2, 2],
+              wind:  [1, 2, 3, 1, 1, 1, 2],
+              gust:  [1, 2, 3, 1, 1, 1, 2],
+              pop:   [3, 3, 3, 0, 0, 3, 3] },
+      wx: { tmax:[95,97,101,84,78,90,94], rhmin:[11,13,9,32,45,20,15], rhrec:[52,48,40,75,88,60,55],
+            wind:[8,12,18,6,5,7,11], gust:[14,22,31,10,9,13,19], pop:[5,10,5,55,70,10,8],
+            cape:[150,300,1200,400,100,200,250], precip:[0,0,0,0.25,0.4,0,0] } },
+    WYZ275: { t: [1, 1, 2, 2, 3, 2, 1], s: [0.9, 1.0, 1.6, 1.7, 2.3, 1.6, 1.1], dl: [0, 0, 0, 0, 3, 0, 0],
+      drv: ["", "", "", "", "gust", "", ""] }   /* v1-shaped zone: no rows/wx — tolerance path */
   },
-  failed: [], no_climo: 0, dropped_vars: []
+  failed: [], no_climo: 0, dropped_vars: [], bad_coords: []
 };
 const FIX_GEO = { type: "FeatureCollection", features: [
   { type: "Feature", properties: { id: "ORZ693", name: "Canyon Grassland of Wallowa County", st: "OR" },
@@ -156,6 +189,20 @@ setTimeout(() => {
 
   /* v1.2 — dl layer present; jsdom has no 2D canvas so the circle fallback is the expected path */
   ck("dl-fallback-circle", mapStub.layers["dl-pts"].type === "circle");
+
+  /* v1.3 — schema v2 panel: weather grid with CAPE, top-2 drivers */
+  ck("wx-grid-visible", $("pnlWxWrap").style.display === "block");
+  ck("wx-grid-cape", $("pnlWx").textContent.indexOf("CAPE") >= 0 && $("pnlWx").textContent.indexOf("J/kg") >= 0);
+  ck("top2-rendered", $("pnlDrivers").textContent.indexOf("1. ") >= 0 && $("pnlDrivers").textContent.indexOf("2. ") >= 0);
+  w.eval("setDay(4)");   /* ORZ693 day4: t=0 — inhibitor should show */
+  ck("inhibitor-rendered", $("pnlDrivers").textContent.indexOf("Biggest inhibitor") >= 0);
+  ck("inhibitor-names-rh", $("pnlDrivers").textContent.indexOf("higher RH") >= 0);
+  w.eval("setDay(0)");
+  w.eval("selectZone('WYZ275')");   /* v1-shaped zone: weather hidden, single-driver fallback */
+  ck("v1-zone-wx-hidden", $("pnlWxWrap").style.display === "none");
+  w.eval("setDay(4)");
+  ck("v1-zone-single-driver", $("pnlDrivers").textContent.indexOf("Top driver") >= 0);
+  w.eval("setDay(0)"); w.eval("selectZone('ORZ693')");
 
   /* v1.2 — outlooks dropdown toggles and carries the v83 link set */
   $("btnOutlooks").dispatchEvent(new w.MouseEvent("click", { bubbles: true }));

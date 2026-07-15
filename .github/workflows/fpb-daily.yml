@@ -1,4 +1,3 @@
-
 name: FPB daily national ratings
 on:
   schedule:

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /* =========================================================================
-   FPB — rate_national.js (v1.1)
+   FPB — rate_national.js (v1.2)
    Daily national zone ratings: forecast (Open-Meteo, single model, batched
    multi-point) × precomputed climatology (climo-fetcher output) → per-zone
    per-day composite tier via the extracted v83 engine.
@@ -21,6 +21,13 @@
    backoff --backoff429 ms) and sustained 429 aborts WITHOUT writing output
    (yesterday's latest.json stays live); size-mismatch responses fall back
    to singles instead of looping.
+   v1.2: quote-aware zones CSV parsing (names containing commas no longer
+   shift columns — the CAZ271/IDZ421/NVZ438 lat=lon bug); coordinate range
+   validation skips bad rows BEFORE spending API calls (reported in
+   bad_coords); schema fpb-national-2 adds per-zone weather fields
+   (tmax/rhmin/rhrec/wind/gust/pop/cape/precip) and per-row severities +
+   weights + ladder tag for the map panel, top-2 drivers/inhibitors, and
+   ladder calibration; parse failures now log a response snippet.
    ========================================================================= */
 "use strict";
 const fs = require("fs");
@@ -70,18 +77,24 @@ const DAILY_TRIM  = ["temperature_2m_max", "precipitation_sum",
 function readZones(){
   const txt = fs.readFileSync(ZONES_CSV, "utf8").trim();
   const lines = txt.split(/\r?\n/);
-  const hdr = lines[0].split(",").map(h => h.trim().toLowerCase());
+  const hdr = S.splitCsvLine(lines[0]).map(h => h.toLowerCase());
   const ix = { id: hdr.indexOf("id"), lat: hdr.indexOf("lat"), lon: hdr.indexOf("lon") };
   if (ix.id < 0 || ix.lat < 0 || ix.lon < 0) throw new Error("zones csv needs id,lat,lon columns");
-  const out = [];
+  const out = []; const badCoords = [];
   for (let i = 1; i < lines.length; i++){
-    const c = lines[i].split(",");
+    const c = S.splitCsvLine(lines[i]);       /* quote-aware: commas inside names stay put */
     const id = (c[ix.id] || "").trim();
     if (!id) continue;
     if (STATES.length && !STATES.includes(id.slice(0, 2))) continue;
-    out.push({ id, lat: +c[ix.lat], lon: +c[ix.lon] });
+    const lat = +c[ix.lat], lon = +c[ix.lon];
+    if (!isFinite(lat) || lat < -90 || lat > 90 || !isFinite(lon) || lon < -180 || lon > 180){
+      badCoords.push(id);
+      console.log("BAD COORDS " + id + " (lat=" + c[ix.lat] + ", lon=" + c[ix.lon] + ") — skipped before fetch");
+      continue;
+    }
+    out.push({ id, lat, lon });
   }
-  return out;
+  return { zones: out, badCoords };
 }
 function loadClimo(id){
   const p = path.join(CLIMO_DIR, id + ".json");
@@ -91,7 +104,10 @@ function loadClimo(id){
 }
 
 /* ---------- rating ---------- */
-/* one zone-day of parsed fields -> {tier, score, dl, drv} */
+const ROW_IDS = ["tmax","rhmin","rhrec","wind","gust","pop"];   /* + dryltg via dl */
+const WX_ROUND = { tmax:1, rhmin:1, rhrec:1, wind:1, gust:1, pop:1, cape:1, precip:100 };
+function rnd(v, f){ return v == null ? null : Math.round(v * f) / f; }
+/* one zone-day of parsed fields -> {tier, score, dl, drv, sev{}, wx{}} */
 function rateDay(d, dayKey, normals){
   const entries = [
     { id: "tmax",  s: C.devSev("tmax",  d.tmax,  dayKey, normals), w: C.THR_DEF.tmax.w },
@@ -105,22 +121,29 @@ function rateDay(d, dayKey, normals){
   const sc = C.scoreContribs(entries);
   let drv = "", best = 0;
   for (const c of sc.contrib) if (c.s >= 2 && c.c > best){ best = c.c; drv = c.id; }
+  const sev = {}; for (const e of entries) if (e.id !== "dryltg") sev[e.id] = e.s;
+  const wx = { tmax:rnd(d.tmax,1), rhmin:rnd(d.rhmin,1), rhrec:rnd(d.rhrec,1),
+    wind:rnd(d.wind,1), gust:rnd(d.gust,1), pop:rnd(d.pop,1), cape:rnd(d.cape,1), precip:rnd(d.precip,100) };
   return {
     tier: C.adjLevel(sc.score),
     score: sc.score == null ? null : Math.round(sc.score * 100) / 100,
     dl: C.dryLightning(d).v || 0,
-    drv
+    drv, sev, wx
   };
 }
 function rateZone(zone, omResp, normals){
   const one = S.parseOmOne(omResp);
   const days = one.days.slice(0, NDAYS);
   const t = [], s = [], dl = [], drv = [];
+  const rows = {}; ROW_IDS.forEach(id => rows[id] = []);
+  const wx = {}; Object.keys(WX_ROUND).forEach(f => wx[f] = []);
   for (const k of days){
     const r = rateDay(one.d[k] || {}, k, normals);
     t.push(r.tier); s.push(r.score); dl.push(r.dl); drv.push(r.drv);
+    ROW_IDS.forEach(id => rows[id].push(r.sev[id]));
+    Object.keys(WX_ROUND).forEach(f => wx[f].push(r.wx[f]));
   }
-  return { days, rec: { t, s, dl, drv } };
+  return { days, rec: { t, s, dl, drv, rows, wx } };
 }
 
 /* ---------- fetch (batched, singles fallback) ---------- */
@@ -130,14 +153,15 @@ async function fetchBatch(cfg, zones, drop){
 }
 async function run(){
   const t0 = Date.now();
-  const all = readZones();
+  const rz = readZones();
+  const all = rz.zones;
   const zones = [], noClimo = [];
   for (const z of all){
     const N = loadClimo(z.id);
     if (N) { z.normals = N; zones.push(z); } else noClimo.push(z.id);
     if (LIMIT && zones.length >= LIMIT) break;
   }
-  console.log("zones in csv: " + all.length + " | with climo: " + zones.length + " | skipped (no climo): " + noClimo.length);
+  console.log("zones in csv: " + all.length + " | with climo: " + zones.length + " | skipped (no climo): " + noClimo.length + " | bad coords: " + rz.badCoords.length);
   if (!zones.length) throw new Error("no zones with climatology found under " + CLIMO_DIR);
 
   const cfg = { key: (process.env.OM_API_KEY || "").trim() || undefined,
@@ -187,7 +211,10 @@ async function run(){
       batch.forEach((z, j) => {
         try { const { days, rec } = rateZone(z, resps[j], z.normals);
           daysRef = daysRef || days; out[z.id] = rec;
-        } catch (e){ failed.push(z.id); if (failed.length <= 10) console.log("\n  zone " + z.id + " parse failed: " + errStr(e)); }
+        } catch (e){ failed.push(z.id); if (failed.length <= 10){
+          console.log("\n  zone " + z.id + " parse failed: " + errStr(e));
+          try { console.log("    response snippet: " + JSON.stringify(resps[j]).slice(0, 200)); } catch(_) {}
+        } }
       });
     }
     process.stdout.write("\r  rated " + Object.keys(out).length + "/" + zones.length + " (" + calls + " calls)   ");
@@ -196,16 +223,20 @@ async function run(){
   console.log("");
 
   const doc = {
-    schema: "fpb-national-1",
+    schema: "fpb-national-2",
     generated: new Date().toISOString(),
     pointset_version: "poi-v1",
     model: MODEL,
     composite: "national-v1 (tmax/rhmin/rhrec sigma + wind/gust/pop abs + dry-ltg CAPE path)",
+    ladder: "v83-normalT2",
+    weights: { tmax:C.THR_DEF.tmax.w, rhmin:C.THR_DEF.rhmin.w, rhrec:C.THR_DEF.rhrec.w,
+               wind:C.THR_DEF.wind.w, gust:C.THR_DEF.gust.w, pop:C.THR_DEF.pop.w, dryltg:C.W_DRY },
     days: daysRef || [],
     dropped_vars: drop.filter(x => typeof x === "string"),
     zones: out,
     failed: failed,
-    no_climo: noClimo.length
+    no_climo: noClimo.length,
+    bad_coords: rz.badCoords
   };
   fs.mkdirSync(OUT_DIR, { recursive: true });
   const dated = path.join(OUT_DIR, (daysRef ? daysRef[0] : new Date().toISOString().slice(0, 10)) + ".json");

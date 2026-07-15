@@ -188,7 +188,7 @@ select,.btn{background:var(--panel2); color:var(--text); border:1px solid var(--
 <div id="app">
 
   <header>
-    <div class="brand"><h1>Fire potential briefing</h1><span class="sub">national · v1.2</span></div>
+    <div class="brand"><h1>Fire potential briefing</h1><span class="sub">national · v1.3</span></div>
     <div id="hdrZone">loading…</div>
     <div class="pills">
       <div id="outlooksWrap">
@@ -294,6 +294,10 @@ select,.btn{background:var(--panel2); color:var(--text); border:1px solid var(--
           <div class="hd">Drivers <span class="mono" id="pnlBasis">national composite</span></div>
           <div class="bd" id="pnlDrivers"></div>
         </div>
+        <div class="pgroup" id="pnlWxWrap" style="display:none">
+          <div class="hd">Day weather <span class="mono">single model</span></div>
+          <div class="bd" id="pnlWx"></div>
+        </div>
         <div style="padding:10px 14px; display:flex; flex-direction:column; gap:8px">
           <button class="btn" id="btnWkChart">7-day score chart ▸</button>
         </div>
@@ -320,7 +324,7 @@ select,.btn{background:var(--panel2); color:var(--text); border:1px solid var(--
 /* ================= CONFIG (constants before any boot code — TDZ discipline) ================= */
 const PATH_RATINGS  = "ratings/latest.json";
 const PATH_ZONES    = "data/zones.geojson";
-const SCHEMA_OK     = "fpb-national-1";
+const SCHEMA_OK     = ["fpb-national-1","fpb-national-2"];
 const NDAYS         = 7;
 /* 5-tier NFDRS-standard palette: Low green, Moderate blue, High yellow,
    Very High orange, Extreme red — hexes tuned to read at 0.50 opacity on
@@ -443,6 +447,52 @@ function pinsToggle(list, id){
   if (i>=0){ const c=list.slice(); c.splice(i,1); return c; }
   return list.concat([id]);
 }
+const WX_LAB = [["tmax","Max temp","°F"],["rhmin","RH min","%"],["rhrec","RH recovery","%"],
+  ["wind","Wind","mph"],["gust","Gusts","mph"],["pop","PoP","%"],["cape","CAPE","J/kg"],["precip","Precip","in"]];
+const INH_LAB = { tmax:"cool temps", rhmin:"higher RH", rhrec:"good overnight recovery",
+  wind:"light winds", gust:"modest gusts", pop:"wet pattern" };
+function driverEntries(rec, weights, i){
+  if (!rec || !rec.rows || !weights) return null;
+  const out = [];
+  for (const id in rec.rows){
+    const s = rec.rows[id][i], w = weights[id];
+    if (s == null || !w) continue;
+    out.push({ id, s, w, c: w * s });
+  }
+  const dls = rec.dl ? rec.dl[i] : null;
+  if (dls != null && weights.dryltg) out.push({ id:"dryltg", s:dls, w:weights.dryltg, c:weights.dryltg*dls });
+  return out;
+}
+function topDrivers(rec, weights, i, n){
+  const e = driverEntries(rec, weights, i);
+  if (!e) return null;
+  return e.filter(x => x.s >= 2).sort((a,b) => b.c - a.c).slice(0, n || 2);
+}
+function inhibitor(rec, weights, i){
+  const e = driverEntries(rec, weights, i);
+  if (!e) return null;
+  let best = null;
+  for (const x of e){
+    if (x.id === "dryltg" || x.s == null || x.s > 1 || !INH_LAB[x.id]) continue;
+    const sc = x.w * (2 - x.s);
+    if (!best || sc > best.sc) best = { id:x.id, s:x.s, sc };
+  }
+  return best;
+}
+function drvValueTxt(id, rec, i){
+  const wx = rec && rec.wx; if (!wx) return "";
+  const v = f => (wx[f] && wx[f][i] != null) ? wx[f][i] : null;
+  switch (id){
+    case "tmax":  return v("tmax") == null ? "" : v("tmax") + "°F";
+    case "rhmin": return v("rhmin") == null ? "" : v("rhmin") + "%";
+    case "rhrec": return v("rhrec") == null ? "" : v("rhrec") + "%";
+    case "wind":  return v("wind") == null ? "" : v("wind") + " mph";
+    case "gust":  return v("gust") == null ? "" : v("gust") + " mph";
+    case "pop":   return v("pop") == null ? "" : v("pop") + "% PoP";
+    case "dryltg":return v("cape") == null ? "" : "CAPE " + v("cape");
+    default: return "";
+  }
+}
 /* ================= [pure-end] ================= */
 
 function $(id){ return document.getElementById(id); }
@@ -514,10 +564,36 @@ function renderPanel(){
     "<span class='tierBig' style='background:"+tierColor(t)+"'>"+(t==null?"—":ADJ[t])+"</span>"+
     "<div style='margin-top:8px' class='mono'>composite "+scoreTxt(rec.s[S.day])+"</div>";
   let rows = "";
-  if (drv) rows += "<div class='drvRow'><span>Top driver</span><span>"+(DRV_LAB[drv]||drv)+"</span></div>";
+  const top2 = topDrivers(rec, S.doc.weights, S.day, 2);
+  if (top2){
+    if (top2.length){
+      top2.forEach((d, k) => {
+        const val = drvValueTxt(d.id, rec, S.day);
+        rows += "<div class='drvRow'><span>"+(k+1)+". "+(DRV_LAB[d.id]||d.id)+"</span><span>"+(val||"&nbsp;")+"</span></div>";
+      });
+    } else rows += "<div class='drvRow'><span>Drivers</span><span>none elevated</span></div>";
+    if (t != null && t <= 1){
+      const inh = inhibitor(rec, S.doc.weights, S.day);
+      if (inh){
+        const val = drvValueTxt(inh.id, rec, S.day);
+        rows += "<div class='drvRow'><span>Biggest inhibitor</span><span>"+INH_LAB[inh.id]+(val?" · "+val:"")+"</span></div>";
+      }
+    }
+  } else if (drv){
+    rows += "<div class='drvRow'><span>Top driver</span><span>"+(DRV_LAB[drv]||drv)+"</span></div>";
+  }
   rows += "<div class='drvRow'><span>Dry lightning</span><span>"+(dl>=DL_MIN?("⚡ "+DL_LAB[dl]):(dl>0?DL_LAB[dl]:"—"))+"</span></div>";
   rows += "<div class='drvRow'><span>Model</span><span class='mono'>"+S.doc.model+"</span></div>";
   $("pnlDrivers").innerHTML = rows;
+  if (rec.wx){
+    $("pnlWxWrap").style.display = "block";
+    $("pnlWx").innerHTML = WX_LAB.map(([f, lab, unit]) => {
+      const v = rec.wx[f] ? rec.wx[f][S.day] : null;
+      return "<div class='drvRow'><span>"+lab+"</span><span class='mono'>"+(v==null?"—":v+" "+unit)+"</span></div>";
+    }).join("");
+  } else {
+    $("pnlWxWrap").style.display = "none";
+  }
 }
 function renderPins(){
   $("pinList").innerHTML = S.pins.map(id=>
@@ -663,7 +739,7 @@ async function loadData(){
   if (!zRes.ok) throw new Error("data/zones.geojson "+zRes.status+" — run tools/prep_map.js and commit");
   const doc = await rRes.json();
   const geo = await zRes.json();
-  if (doc.schema !== SCHEMA_OK) toast("ratings schema '"+doc.schema+"' ≠ "+SCHEMA_OK);
+  if (SCHEMA_OK.indexOf(doc.schema) < 0) toast("ratings schema '"+doc.schema+"' not recognized");
   return { doc, geo };
 }
 function boot(){

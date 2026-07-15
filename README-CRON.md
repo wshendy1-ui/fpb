@@ -46,7 +46,24 @@ limiting aborts the run without writing output**, so the map keeps serving
 yesterday's `latest.json` rather than a half-painted country. Batch failures
 log their reason and fall back to per-zone singles.
 
-## Output schema (`fpb-national-1`)
+## v1.2 changes
+
+- **Fixed the CAZ271 / IDZ421 / NVZ438 failures**: zone names containing
+  commas (quoted in the CSV) shifted columns under the old naive split, so
+  latitude received a longitude. Parsing is now quote-aware, and any row
+  with out-of-range coordinates is skipped *before* spending API calls
+  (reported in `bad_coords`). Expect **940 rated · 0 failed · 24 calls**.
+- **Schema `fpb-national-2`**: per-zone `wx` arrays (tmax, RHmin, RHrec,
+  wind, gust, PoP, CAPE, precip — rounded) and per-row severity arrays
+  (`rows`), plus doc-level `weights` and a `ladder` tag. Powers the map's
+  day-weather panel, top-2 drivers, T0/T1 inhibitor — and the ladder
+  calibration analysis.
+- Parse failures now log a 200-char response snippet for self-diagnosis.
+- Workflow gains a 13:40 UTC safety-net schedule with an idempotence guard
+  (scheduled runs exit early if today's dated file exists; manual runs
+  always execute).
+
+## Output schema (`fpb-national-2`)
 
 ```json
 {
@@ -55,10 +72,14 @@ log their reason and fall back to per-zone singles.
   "pointset_version": "poi-v1",
   "model": "gfs_seamless",
   "days": ["2026-07-15", "..."],
+  "ladder": "v83-normalT2",
+  "weights": { "tmax":0.8, "rhmin":1.3, "...":0 },
   "zones": {
-    "ORZ693": { "t": [4,3,...], "s": [3.1,2.4,...], "dl": [4,0,...], "drv": ["rhmin","",...] }
+    "ORZ693": { "t": [4,...], "s": [3.1,...], "dl": [4,...], "drv": ["rhmin",...],
+                "rows": { "tmax":[3,...], "rhmin":[4,...], "rhrec":[...], "wind":[...], "gust":[...], "pop":[...] },
+                "wx":   { "tmax":[95,...], "rhmin":[11,...], "rhrec":[...], "wind":[...], "gust":[...], "pop":[...], "cape":[...], "precip":[...] } }
   },
-  "failed": [], "no_climo": 0, "dropped_vars": []
+  "failed": [], "no_climo": 0, "bad_coords": [], "dropped_vars": []
 }
 ```
 

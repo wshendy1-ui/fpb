@@ -26,6 +26,7 @@ const ck = (n, c) => { if (c) pass++; else { fail++; console.log("FAIL", n); } }
 
 /* ---------- fixture zones ---------- */
 const Z = [
+  /* COMMA1 added via CSV_ROWS with lat 45.9 lon -117.9 */
   { id: "ORZ693", lat: 45.72, lon: -117.20 },   /* real climo (uploaded) */
   { id: "WYZ275", lat: 44.02, lon: -107.95 },   /* real climo (uploaded) */
   { id: "TST001", lat: 40.00, lon: -110.00 },   /* synthetic climo */
@@ -35,8 +36,15 @@ const Z = [
   { id: "NOCLIM", lat: 42.00, lon: -112.00 },   /* no climo -> skipped */
   { id: "BADPT",  lat: 13.13, lon: -113.13 }    /* mock 400s any call containing 13.13 */
 ];
+/* CSV mirrors prep_zones column order (name BEFORE lon/lat) and quotes names —
+   COMMA1 regression-tests the CAZ271/IDZ421/NVZ438 bug: a comma inside the
+   quoted name must NOT shift the coordinate columns. BADCRD has lon in the
+   lat column and must be skipped before any fetch. */
+const CSV_ROWS = Z.map(z => [z.id, '"Zone ' + z.id + '"', z.lon, z.lat, "poi"].join(","));
+CSV_ROWS.splice(2, 0, 'COMMA1,"Canyon Grassland, of Testing",-117.9,45.9,poi');
+CSV_ROWS.push('BADCRD,"Broken Row",-113.9,-115.9,poi');
 fs.writeFileSync(path.join(WORK, "data", "zones_points.csv"),
-  "id,lat,lon,method\n" + Z.map(z => [z.id, z.lat, z.lon, "poi"].join(",")).join("\n") + "\n");
+  "id,name,lon,lat,method\n" + CSV_ROWS.join("\n") + "\n");
 
 fs.copyFileSync("/mnt/user-data/uploads/ORZ693.json", path.join(WORK, "climo", "ORZ693.json"));
 fs.copyFileSync("/mnt/user-data/uploads/WYZ275.json", path.join(WORK, "climo", "WYZ275.json"));
@@ -50,6 +58,8 @@ function flatClimo(id, tmax, rhmin, rhmax){
 fs.writeFileSync(path.join(WORK, "climo", "TST001.json"), JSON.stringify(flatClimo("TST001", 80, 25, 70)));
 fs.writeFileSync(path.join(WORK, "climo", "TST002.json"), JSON.stringify(flatClimo("TST002", 80, 25, 70)));
 fs.writeFileSync(path.join(WORK, "climo", "MISMAT.json"), JSON.stringify(flatClimo("MISMAT", 80, 25, 70)));
+fs.writeFileSync(path.join(WORK, "climo", "COMMA1.json"), JSON.stringify(flatClimo("COMMA1", 80, 25, 70)));
+fs.writeFileSync(path.join(WORK, "climo", "BADCRD.json"), JSON.stringify(flatClimo("BADCRD", 80, 25, 70)));
 fs.writeFileSync(path.join(WORK, "climo", "TST003.json"), JSON.stringify(flatClimo("TST003", 80, 25, 70)));
 /* BADPT gets climo so it survives to the fetch stage */
 fs.writeFileSync(path.join(WORK, "climo", "BADPT.json"), JSON.stringify(flatClimo("BADPT", 80, 25, 70)));
@@ -68,12 +78,14 @@ const SCRIPT = {
   WYZ275: { tmax: 75, rhFloor: 40, cape: 50, precip: 0.4, wind: 6, gust: 10, pop: 70 }, /* benign, wet */
   TST001: { tmax: 80, rhFloor: 25, cape: 50, precip: 0, wind: 3, gust: 8,  pop: 10 },   /* exactly normal */
   TST002: { tmax: 80, rhFloor: 25, cape: 600, precip: 0, wind: 3, gust: 8, pop: 10 },   /* normal + dry cape */
+  COMMA1: { tmax: 80, rhFloor: 25, cape: 50, precip: 0, wind: 3, gust: 8, pop: 10 },
   MISMAT: { tmax: 80, rhFloor: 25, cape: 50, precip: 0, wind: 3, gust: 8, pop: 10 },
   TST003: { tmax: 80, rhFloor: 25, cape: 50, precip: 0, wind: 3, gust: 8, pop: 10 },
   BADPT:  { tmax: 80, rhFloor: 25, cape: 0, precip: 0, wind: 0, gust: 0, pop: 0 }
 };
 function omRespFor(lat, lon){
-  const z = Z.find(q => Math.abs(q.lat - lat) < 1e-6 && Math.abs(q.lon - lon) < 1e-6);
+  let z = Z.find(q => Math.abs(q.lat - lat) < 1e-6 && Math.abs(q.lon - lon) < 1e-6);
+  if (!z && Math.abs(lat - 45.9) < 1e-6) z = { id: "COMMA1" };
   const sc = SCRIPT[z.id];
   const time = []; for (const d of DAYS) for (let h = 0; h < 24; h++) time.push(d + "T" + String(h).padStart(2, "0") + ":00");
   const rh = time.map((t, i) => {
@@ -135,7 +147,7 @@ function runAsserts(){
   const latest = JSON.parse(fs.readFileSync(path.join(WORK, "ratings", "latest.json"), "utf8"));
   const dated = path.join(WORK, "ratings", DAYS[0] + ".json");
   ck("dated-file", fs.existsSync(dated));
-  ck("schema", latest.schema === "fpb-national-1" && latest.pointset_version === "poi-v1");
+  ck("schema", latest.pointset_version === "poi-v1");
   ck("days", JSON.stringify(latest.days) === JSON.stringify(DAYS));
   ck("noclim-skipped", latest.no_climo === 1 && !latest.zones.NOCLIM);
   ck("429-retried-same-batch", (CHILD_OUT.match(/429 on batch/g) || []).length === 2);
@@ -145,7 +157,20 @@ function runAsserts(){
   ck("tst003-rated", !!latest.zones.TST003);
   ck("badpt-failed", latest.failed.length === 1 && latest.failed[0] === "BADPT");
   ck("batchmates-survived", !!latest.zones.TST001 && !!latest.zones.TST002 && !!latest.zones.WYZ275);
-  ck("rated-count", Object.keys(latest.zones).length === 6);
+  ck("rated-count", Object.keys(latest.zones).length === 7);
+  ck("comma-name-zone-rated", !!latest.zones.COMMA1 && latest.zones.COMMA1.t.every(v => v != null));
+  ck("bad-coords-skipped", JSON.stringify(latest.bad_coords) === JSON.stringify(["BADCRD"]));
+  ck("bad-coords-not-failed", latest.failed.indexOf("BADCRD") < 0);
+  ck("schema-v2", latest.schema === "fpb-national-2" && latest.ladder === "v83-normalT2");
+  ck("weights-present", latest.weights && latest.weights.rhmin === 1.3 && latest.weights.dryltg === 1.1);
+  ck("wx-day0-tmax", latest.zones.TST001.wx.tmax[0] === 80);
+  ck("wx-cape", latest.zones.TST002.wx.cape[0] === 600);
+  ck("wx-precip-rounded", latest.zones.WYZ275.wx.precip[0] === 0.4);
+  ck("rows-shape", JSON.stringify(Object.keys(latest.zones.TST001.rows).sort()) ===
+                   JSON.stringify(["gust","pop","rhmin","rhrec","tmax","wind"]));
+  ck("rows-tst001-day0", latest.zones.TST001.rows.tmax[0] === 2 && latest.zones.TST001.rows.pop[0] === 3 &&
+                         latest.zones.TST001.rows.rhrec[0] === 0);
+  ck("rows-orz693-hot", latest.zones.ORZ693.rows.tmax[0] === 4 && latest.zones.ORZ693.rows.rhmin[0] === 4);
 
   /* hand-verified expectations, mirroring the engine math exactly */
   /* TST001 — everything at normal, calm, dry-but-no-cape:
