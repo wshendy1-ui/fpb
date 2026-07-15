@@ -1,0 +1,29 @@
+name: FPB daily national ratings
+on:
+  schedule:
+    - cron: "40 12 * * *"   # 12:40 UTC ~ 5:40 AM PDT, fresh 06z guidance
+  workflow_dispatch: {}
+permissions:
+  contents: write
+concurrency:
+  group: fpb-daily
+  cancel-in-progress: false
+jobs:
+  rate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Rate national zones
+        env:
+          OM_API_KEY: ${{ secrets.OM_API_KEY }}
+        run: node cron/rate_national.js --zones data/zones_points.csv --climo climo --out ratings
+      - name: Commit ratings
+        run: |
+          git config user.name "fpb-bot"
+          git config user.email "fpb-bot@users.noreply.github.com"
+          git add ratings/
+          git commit -m "ratings: $(date -u +%F) [skip ci]" || echo "no changes"
+          git push
