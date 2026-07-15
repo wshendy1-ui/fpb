@@ -151,9 +151,11 @@ select,.btn{background:var(--panel2); color:var(--text); border:1px solid var(--
 
 
 /* ---- v1 wiring additions ---- */
-#tip{position:absolute; z-index:30; pointer-events:none; background:var(--panel,#20262e); border:1px solid var(--line,#39414c);
-  border-radius:6px; padding:6px 9px; font:500 12px Barlow; color:var(--ink,#e8e4da); display:none; max-width:260px;}
-#tip .t2{font:400 11px "IBM Plex Mono"; color:var(--faint,#8a93a0); margin-top:2px;}
+#tip{position:absolute; z-index:30; pointer-events:none; background:rgba(18,22,28,.96); border:1px solid #4a5563;
+  border-radius:6px; padding:6px 9px; font:500 12px Barlow; color:#e8e4da; display:none; max-width:260px;}
+#tip b{color:#ffffff;}
+#tip .t2{font:400 11px "IBM Plex Mono"; color:#aab3c0; margin-top:2px;}
+.day .tier{font-size:17px;}   /* room for "V HIGH" */
 #banner{position:absolute; left:50%; top:14px; transform:translateX(-50%); z-index:40; display:none;
   background:#3a2020; border:1px solid #7a3b3b; color:#f0d9d9; padding:8px 14px; border-radius:8px; font:500 13px Barlow;}
 #pinList .pin{display:flex; justify-content:space-between; align-items:center; padding:4px 6px; border:1px solid var(--line,#39414c);
@@ -168,6 +170,13 @@ select,.btn{background:var(--panel2); color:var(--text); border:1px solid var(--
 .drvRow .mono{color:var(--faint,#8a93a0);}
 .chipDl{margin-left:4px;}
 .pill.bad{border-color:#7a3b3b; color:#e07a6a;}
+#outlooksWrap{position:relative;}
+#outlooksMenu{position:absolute; right:0; top:calc(100% + 6px); z-index:50; display:none; min-width:230px;
+  background:rgba(18,22,28,.98); border:1px solid #4a5563; border-radius:8px; padding:8px 0; box-shadow:0 8px 24px rgba(0,0,0,.45);}
+#outlooksMenu.open{display:block;}
+#outlooksMenu .og{font:600 10px "Barlow Condensed"; letter-spacing:.16em; text-transform:uppercase; color:#8a93a0; padding:7px 12px 3px;}
+#outlooksMenu a{display:block; padding:5px 12px; color:#e8e4da; text-decoration:none; font:500 12px Barlow;}
+#outlooksMenu a:hover{color:#e8842a; background:rgba(232,132,42,.08);}
 #pnlDayHead{font:600 13px "Barlow Condensed"; letter-spacing:.14em; text-transform:uppercase; color:var(--faint); padding:12px 14px 4px;}
 #zoneMeta{padding:0 14px 10px; font:400 13px Barlow; color:var(--dim);}
 #zoneMeta b{color:var(--text);}
@@ -179,9 +188,31 @@ select,.btn{background:var(--panel2); color:var(--text); border:1px solid var(--
 <div id="app">
 
   <header>
-    <div class="brand"><h1>Fire potential briefing</h1><span class="sub">national · v1</span></div>
+    <div class="brand"><h1>Fire potential briefing</h1><span class="sub">national · v1.2</span></div>
     <div id="hdrZone">loading…</div>
     <div class="pills">
+      <div id="outlooksWrap">
+        <button class="btn small" id="btnOutlooks">Outlooks ▾</button>
+        <div id="outlooksMenu">
+          <div class="og">Fuels &amp; NFDRS</div>
+          <a href="https://fems.fs2c.usda.gov/" target="_blank" rel="noopener">FEMS</a>
+          <a href="https://pnwwildfireplanning.pythonanywhere.com/nfdrs/" target="_blank" rel="noopener">Region 6 NFDRS</a>
+          <a href="https://bmidc.org/firedngr.shtml" target="_blank" rel="noopener">BMIDC Fuels</a>
+          <a href="https://www.wfas.net/" target="_blank" rel="noopener">WFAS</a>
+          <div class="og">Weather</div>
+          <a href="https://www.weather.gov/wrh/fire" target="_blank" rel="noopener">Fire Wx</a>
+          <a href="https://www.spc.noaa.gov/products/fire_wx/" target="_blank" rel="noopener">SPC Fire Wx Outlook</a>
+          <a href="https://hdwindex.fs2c.usda.gov/" target="_blank" rel="noopener">HDWI</a>
+          <a href="https://www.weather.gov/alerts" target="_blank" rel="noopener">NWS alerts</a>
+          <a href="https://www.cpc.ncep.noaa.gov/products/predictions/610day/" target="_blank" rel="noopener">CPC 6–10 day</a>
+          <a href="https://www.cpc.ncep.noaa.gov/products/predictions/814day/" target="_blank" rel="noopener">CPC 8–14 day</a>
+          <div class="og">Intel &amp; Outlooks</div>
+          <a href="https://www.nifc.gov/nicc/incident-information/imsr" target="_blank" rel="noopener">National IMSR</a>
+          <a href="https://gacc.nifc.gov/nwcc/information/sitreport.aspx" target="_blank" rel="noopener">NWCC Sit Report</a>
+          <a href="https://gacc.nifc.gov/nwcc/predict/outlook.aspx" target="_blank" rel="noopener">NWCC 7-day potential</a>
+          <a href="https://bmidc.org/intel.shtml" target="_blank" rel="noopener">BMIDC Intel</a>
+        </div>
+      </div>
       <input id="zSearch" placeholder="zone id ⏎" aria-label="Zone search">
       <button class="btn small" id="btnHome">⌂ ORZ693</button>
       <span class="pill ok" id="pillRatings">ratings —</span>
@@ -209,6 +240,11 @@ select,.btn{background:var(--panel2); color:var(--text); border:1px solid var(--
   <div id="main">
 
     <nav id="rail">
+      <div class="sect">
+        <div class="hd">Basemap</div>
+        <select id="basemapSel" aria-label="Basemap" style="width:100%"></select>
+      </div>
+
       <div class="sect">
         <div class="hd">Layers</div>
         <label class="chk"><input type="checkbox" id="lyrZones" checked> FWZ choropleth</label>
@@ -286,8 +322,10 @@ const PATH_RATINGS  = "ratings/latest.json";
 const PATH_ZONES    = "data/zones.geojson";
 const SCHEMA_OK     = "fpb-national-1";
 const NDAYS         = 7;
-/* 5-tier scale aligned to the engine's ADJ ladder (skeleton's 6-tier mock retired) */
-const TIER_COLORS   = ["#4f7d63","#e0bd55","#e3883a","#d94f3d","#93306f"];
+/* 5-tier NFDRS-standard palette: Low green, Moderate blue, High yellow,
+   Very High orange, Extreme red — hexes tuned to read at 0.50 opacity on
+   both dark and light basemaps. */
+const TIER_COLORS   = ["#3f9d4f","#3b7fd4","#e6c832","#e8842a","#d93025"];
 const ADJ           = ["LOW","MODERATE","HIGH","VERY HIGH","EXTREME"];
 const ADJ_S         = ["LOW","MOD","HIGH","V HIGH","EXTR"];
 const NODATA_COLOR  = "#39414c";
@@ -300,18 +338,40 @@ const PIN_SEED      = ["ORZ693","ORZ694","ORZ695"];
 const STORE_PINS    = "fpb.map.pins.v1";
 const CONUS_BOUNDS  = [[-125.5, 24.2], [-66.5, 49.8]];
 const HOME_ZOOM     = 6.3;
+const DL_LAB        = ["—","LOW","MOD","HIGH","HIGH"];
 const DRV_LAB       = { tmax:"Temperature anomaly", rhmin:"RH-min anomaly", rhrec:"Poor RH recovery",
                         wind:"Sustained wind", gust:"Gusts", pop:"Dry pattern (low PoP)", dryltg:"Dry lightning" };
-const BASEMAP_STYLE = {
-  version: 8,
-  sources: { carto: { type:"raster",
+const STORE_BASEMAP = "fpb.map.basemap.v1";
+const BASEMAPS = {
+  "carto-dark":  { label:"Carto Dark",         dark:true,  op:0.75,
+    attr:"© OpenStreetMap contributors © CARTO",
     tiles:["https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
            "https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
-           "https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png"],
-    tileSize:256, attribution:"© OpenStreetMap contributors © CARTO" } },
-  layers: [ { id:"bg", type:"background", paint:{ "background-color":"#161b22" } },
-            { id:"carto", type:"raster", source:"carto", paint:{ "raster-opacity":0.75 } } ]
+           "https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png"] },
+  "carto-light": { label:"Carto Light",        dark:false, op:0.85,
+    attr:"© OpenStreetMap contributors © CARTO",
+    tiles:["https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
+           "https://b.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
+           "https://c.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png"] },
+  "usgs-topo":   { label:"USGS Topo",          dark:false, op:0.92,
+    attr:"USGS The National Map",
+    tiles:["https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}"] },
+  "usgs-img":    { label:"USGS Imagery Topo",  dark:true,  op:0.85,
+    attr:"USGS The National Map",
+    tiles:["https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryTopo/MapServer/tile/{z}/{y}/{x}"] }
 };
+function buildBasemapStyle(active){
+  const style = { version:8, sources:{}, layers:[
+    { id:"bg", type:"background", paint:{ "background-color":"#161b22" } } ] };
+  for (const k in BASEMAPS){
+    const b = BASEMAPS[k];
+    style.sources[k] = { type:"raster", tiles:b.tiles, tileSize:256, attribution:b.attr };
+    style.layers.push({ id:"bm-"+k, type:"raster", source:k,
+      layout:{ visibility: k===active ? "visible":"none" },
+      paint:{ "raster-opacity": b.op } });
+  }
+  return style;
+}
 
 /* ================= [pure-begin] view-agnostic helpers (node-tested) ================= */
 function tierColor(t){ return (t==null||t<0||t>4)?NODATA_COLOR:TIER_COLORS[t]; }
@@ -424,7 +484,7 @@ function renderMatrix(){
       card.innerHTML =
         '<div class="dow">' + (i===0?"TODAY":dow) + '</div>' +
         '<div class="date">' + date + '</div>' +
-        '<div class="tier" style="color:'+tierColor(t)+'">' + (t==null?"—":"T"+t) +
+        '<div class="tier" style="color:'+tierColor(t)+'">' + (t==null?"—":ADJ_S[t]) +
           (dl>=DL_MIN?'<span class="chipDl">⚡</span>':"") + '</div>' +
         '<div class="wx mono">' + scoreTxt(rec.s[i]) + '</div>';
       card.addEventListener("click", ()=>setDay(i));
@@ -452,11 +512,10 @@ function renderPanel(){
   const t = rec.t[S.day], dl = rec.dl[S.day]||0, drv = rec.drv[S.day]||"";
   $("pnlRating").innerHTML =
     "<span class='tierBig' style='background:"+tierColor(t)+"'>"+(t==null?"—":ADJ[t])+"</span>"+
-    "<div style='margin-top:8px' class='mono'>composite "+scoreTxt(rec.s[S.day])+
-    (t!=null?" → T"+t:"")+"</div>";
+    "<div style='margin-top:8px' class='mono'>composite "+scoreTxt(rec.s[S.day])+"</div>";
   let rows = "";
   if (drv) rows += "<div class='drvRow'><span>Top driver</span><span>"+(DRV_LAB[drv]||drv)+"</span></div>";
-  rows += "<div class='drvRow'><span>Dry lightning</span><span>"+(dl>=DL_MIN?("⚡ T"+dl):(dl>0?("T"+dl):"—"))+"</span></div>";
+  rows += "<div class='drvRow'><span>Dry lightning</span><span>"+(dl>=DL_MIN?("⚡ "+DL_LAB[dl]):(dl>0?DL_LAB[dl]:"—"))+"</span></div>";
   rows += "<div class='drvRow'><span>Model</span><span class='mono'>"+S.doc.model+"</span></div>";
   $("pnlDrivers").innerHTML = rows;
 }
@@ -514,6 +573,27 @@ function flyToZone(id){
   selectZone(id);
   map.flyTo({ center:c, zoom:HOME_ZOOM, speed:1.6 });
 }
+function applyBasemap(id){
+  if (!BASEMAPS[id]) return;
+  localStorage.setItem(STORE_BASEMAP, id);
+  if (!map || !map.getLayer) return;
+  for (const k in BASEMAPS)
+    if (map.getLayer("bm-"+k)) map.setLayoutProperty("bm-"+k, "visibility", k===id?"visible":"none");
+  if (map.getLayer("zones-sel"))
+    map.setPaintProperty("zones-sel", "line-color", BASEMAPS[id].dark ? "#e8e4da" : "#14181d");
+}
+function makeBoltImage(){
+  try {
+    const c = document.createElement("canvas"); c.width = 26; c.height = 26;
+    const x = c.getContext("2d"); if (!x) return null;
+    x.beginPath();
+    x.moveTo(15,1); x.lineTo(6,15); x.lineTo(12,15); x.lineTo(10,25); x.lineTo(20,10); x.lineTo(13,10); x.closePath();
+    x.fillStyle = "#ffd75e"; x.fill();
+    x.lineWidth = 1.6; x.strokeStyle = "#14181d"; x.stroke();
+    const d = x.getImageData(0,0,26,26);
+    return { width:26, height:26, data:new Uint8Array(d.data) };
+  } catch(e){ return null; }
+}
 function addAppLayers(zonesGeo, dlGeo){
   map.addSource("zones", { type:"geojson", data:zonesGeo });
   map.addLayer({ id:"zones-fill", type:"fill", source:"zones",
@@ -523,8 +603,16 @@ function addAppLayers(zonesGeo, dlGeo){
   map.addLayer({ id:"zones-sel", type:"line", source:"zones",
     filter:["==",["get","id"],""], paint:{ "line-color":"#e8e4da", "line-width":2.2 } });
   map.addSource("dl", { type:"geojson", data:dlGeo });
-  map.addLayer({ id:"dl-pts", type:"circle", source:"dl", filter:dlFilter(0),
-    paint:{ "circle-radius":3.5, "circle-color":"#ffd75e", "circle-stroke-color":"#14181d", "circle-stroke-width":1 } });
+  const bolt = makeBoltImage();
+  if (bolt && map.addImage){
+    map.addImage("dl-bolt", bolt);
+    map.addLayer({ id:"dl-pts", type:"symbol", source:"dl", filter:dlFilter(0),
+      layout:{ "icon-image":"dl-bolt", "icon-size":0.7, "icon-allow-overlap":true } });
+  } else {
+    /* environments without 2D canvas (tests) fall back to the circle */
+    map.addLayer({ id:"dl-pts", type:"circle", source:"dl", filter:dlFilter(0),
+      paint:{ "circle-radius":3.5, "circle-color":"#ffd75e", "circle-stroke-color":"#14181d", "circle-stroke-width":1 } });
+  }
 
   map.on("click","zones-fill", e=>{
     const f = e.features && e.features[0]; if (!f) return;
@@ -539,7 +627,7 @@ function addAppLayers(zonesGeo, dlGeo){
     tip.style.display="block";
     tip.style.left=(e.point.x+14)+"px"; tip.style.top=(e.point.y+14)+"px";
     tip.innerHTML = "<b>"+id+"</b> — "+(f.properties.name||"")+
-      "<div class='t2'>"+(t==null?"no rating":("T"+t+" · "+ADJ[t]+" · "+scoreTxt(rec.s[S.day])))+"</div>";
+      "<div class='t2'>"+(t==null?"no rating":(ADJ[t]+" · "+scoreTxt(rec.s[S.day])))+"</div>";
   });
   map.on("mouseleave","zones-fill", ()=>{ map.getCanvas().style.cursor=""; tip.style.display="none"; });
 }
@@ -588,7 +676,11 @@ function boot(){
     renderPills(); buildTicks();
     $("hdrZone").textContent = "no zone selected — click the map";
     if (typeof maplibregl === "undefined"){ banner("MapLibre failed to load — check network"); return; }
-    map = new maplibregl.Map({ container:"map", style:BASEMAP_STYLE,
+    const bm0 = (localStorage.getItem(STORE_BASEMAP) in BASEMAPS) ? localStorage.getItem(STORE_BASEMAP) : "carto-dark";
+    const sel = $("basemapSel");
+    sel.innerHTML = Object.keys(BASEMAPS).map(k=>"<option value='"+k+"'"+(k===bm0?" selected":"")+">"+BASEMAPS[k].label+"</option>").join("");
+    sel.addEventListener("change", e=>applyBasemap(e.target.value));
+    map = new maplibregl.Map({ container:"map", style:buildBasemapStyle(bm0),
       bounds:CONUS_BOUNDS, fitBoundsOptions:{ padding:20 }, attributionControl:true });
     map.addControl(new maplibregl.NavigationControl({ showCompass:false }), "top-right");
     map.on("load", ()=>{
@@ -614,6 +706,12 @@ function boot(){
     S.pins = pinsToggle(S.pins, S.sel);
     localStorage.setItem(STORE_PINS, JSON.stringify(S.pins));
     renderPins(); renderPanel();
+  });
+  $("btnOutlooks").addEventListener("click", e=>{
+    e.stopPropagation(); $("outlooksMenu").classList.toggle("open");
+  });
+  document.addEventListener("click", e=>{
+    if (!$("outlooksWrap").contains(e.target)) $("outlooksMenu").classList.remove("open");
   });
   $("btnRefine").addEventListener("click", ()=>toast("Live deep pull (multi-model wx, FEMS fuels, HDW/Haines) ships next increment"));
   $("btnWkChart").addEventListener("click", openDrawer);
