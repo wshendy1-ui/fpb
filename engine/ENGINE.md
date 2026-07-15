@@ -50,7 +50,7 @@ Current result: **167 passed, 0 failed.**
 ## API and provenance
 
 ### core.js — constants
-All field-tunable constants, verbatim: `THR_DEF` (663), `DEV_SEV_THR` (635),
+All field-tunable constants, verbatim except one calibrated change: `THR_DEF` (663 — **wind/gust ladders recalibrated to E1 `[8,13,18,25]`/`[15,22,30,40]` on 2026-07-15**, see calibration memo; all other ladders verbatim), `DEV_SEV_THR` (635),
 `SIGMA_SEV_THR` (639), `SIGMA_BANDS` (640), `SD_KEY`/`MIN_SD`/`ANOM_NKEY` (641–643),
 `W_ERC/W_HAINES/W_LAL/W_DRY/W_RFW` (686), `DRYLTG_POT/LAB/SEV` (688), `ADJ`/`ADJ_S`
 (689–690), `ROW_BUCKET` (692), `CONF_*` (695–702), `DEF_BREAKS` (662), `FM_SET/LAB/VARY`

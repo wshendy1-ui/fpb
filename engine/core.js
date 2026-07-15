@@ -44,8 +44,13 @@ const THR_DEF={
   tmax:{t:[80,85,90,95],w:0.8,asc:1,lab:"Max temp °F"},
   rhmin:{t:[30,25,20,15],w:1.3,asc:0,lab:"Min RH %"},
   rhrec:{t:[60,45,35,25],w:1.0,asc:0,lab:"RH recovery %"},
-  wind:{t:[0,5,10,15],w:1.2,asc:1,lab:"Wind sust. mph"},
-  gust:{t:[5,10,15,20],w:0.8,asc:1,lab:"Gusts mph"},
+  /* wind/gust ladders recalibrated 2026-07-15 (calibration memo, candidate E1):
+     original [0,5,10,15]/[5,10,15,20] scored the MEDIAN daily-max July day at
+     sev 3/4 (means 3.24/3.25 across 6,580 zone-days), inflating the national
+     baseline to T3. E1 anchors the median day (14 mph sust / 22 gust) at sev 2
+     and sev 4 at wind-event class. Sigma rows untouched — they were on target. */
+  wind:{t:[8,13,18,25],w:1.2,asc:1,lab:"Wind sust. mph"},
+  gust:{t:[15,22,30,40],w:0.8,asc:1,lab:"Gusts mph"},
   pot:{t:[5,10,30,50],w:0.7,asc:1,lab:"Thunder prob %"},
   pop:{t:[40,25,15,8],w:0.4,asc:0,lab:"PoP %"},
   cape:{t:[200,500,1000,1500],w:0.4,asc:1,lab:"CAPE J/kg"},

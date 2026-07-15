@@ -161,7 +161,7 @@ function runAsserts(){
   ck("comma-name-zone-rated", !!latest.zones.COMMA1 && latest.zones.COMMA1.t.every(v => v != null));
   ck("bad-coords-skipped", JSON.stringify(latest.bad_coords) === JSON.stringify(["BADCRD"]));
   ck("bad-coords-not-failed", latest.failed.indexOf("BADCRD") < 0);
-  ck("schema-v2", latest.schema === "fpb-national-2" && latest.ladder === "v83-normalT2");
+  ck("schema-v2", latest.schema === "fpb-national-2" && latest.ladder === "v83-normalT2-wgE1");
   ck("weights-present", latest.weights && latest.weights.rhmin === 1.3 && latest.weights.dryltg === 1.1);
   ck("wx-day0-tmax", latest.zones.TST001.wx.tmax[0] === 80);
   ck("wx-cape", latest.zones.TST002.wx.cape[0] === 600);
@@ -174,12 +174,12 @@ function runAsserts(){
 
   /* hand-verified expectations, mirroring the engine math exactly */
   /* TST001 — everything at normal, calm, dry-but-no-cape:
-     tmax/rhmin at normal -> T2,T2; rhrec better-than-normal -> T0 ; wind 3 -> 1 ; gust 8 -> 1 ; pop 10 -> 3 ; dryltg 0 (w>0 but s=0 counts) */
+     tmax/rhmin at normal -> T2,T2; rhrec better-than-normal -> T0; calm wind/gust -> 0,0 under E1 ; wind 3 -> 1 ; gust 8 -> 1 ; pop 10 -> 3 ; dryltg 0 (w>0 but s=0 counts) */
   {
     const e = [
       { id: "tmax", s: 2, w: C.THR_DEF.tmax.w }, { id: "rhmin", s: 2, w: C.THR_DEF.rhmin.w },
-      { id: "rhrec", s: 0, w: C.THR_DEF.rhrec.w }, { id: "wind", s: 1, w: C.THR_DEF.wind.w },
-      { id: "gust", s: 1, w: C.THR_DEF.gust.w }, { id: "pop", s: 3, w: C.THR_DEF.pop.w },
+      { id: "rhrec", s: 0, w: C.THR_DEF.rhrec.w }, { id: "wind", s: 0, w: C.THR_DEF.wind.w },   /* 3 mph < 8 (E1) */
+      { id: "gust", s: 0, w: C.THR_DEF.gust.w }, { id: "pop", s: 3, w: C.THR_DEF.pop.w },        /* 8 mph < 15 (E1) */
       { id: "dryltg", s: 0, w: C.W_DRY }
     ];
     const want = C.scoreContribs(e);
