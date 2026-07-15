@@ -1,7 +1,9 @@
+
 name: FPB daily national ratings
 on:
   schedule:
-    - cron: "40 12 * * *"   # 12:40 UTC ~ 5:40 AM PDT, fresh 06z guidance
+    - cron: "40 12 * * *"   # primary — 12:40 UTC / 5:40 AM PDT
+    - cron: "40 13 * * *"   # safety net — no-ops if the primary already ran
   workflow_dispatch: {}
 permissions:
   contents: write
@@ -16,11 +18,22 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Skip if today already rated (scheduled runs only)
+        id: guard
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ] && [ -f "ratings/$(date -u +%F).json" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Today's ratings already exist — nothing to do."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Rate national zones
+        if: steps.guard.outputs.skip != 'true'
         env:
           OM_API_KEY: ${{ secrets.OM_API_KEY }}
         run: node cron/rate_national.js --zones data/zones_points.csv --climo climo --out ratings
       - name: Commit ratings
+        if: steps.guard.outputs.skip != 'true'
         run: |
           git config user.name "fpb-bot"
           git config user.email "fpb-bot@users.noreply.github.com"
