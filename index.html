@@ -1,0 +1,631 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fire Potential Briefing</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet">
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<style>
+
+:root{
+  --ink:#12151a; --panel:#191e25; --panel2:#202731; --line:#2b3441;
+  --text:#e8e4da; --dim:#a2a79b; --faint:#6d7268;
+  --ember:#f59f4a; --ember-deep:#c97a2b;
+  --ok:#7fae6a; --warn:#e0bd55; --bad:#d94f3d;
+  --radius:6px;
+}
+*{box-sizing:border-box; margin:0}
+html,body{height:100%}
+body{background:var(--ink); color:var(--text); font:14px/1.45 Barlow, system-ui, sans-serif;}
+#app{height:100vh; display:grid; grid-template-rows:46px auto auto 1fr; min-width:960px;}
+
+/* ---------- header ---------- */
+header{display:flex; align-items:center; gap:14px; padding:0 14px; background:var(--panel); border-bottom:1px solid var(--line);}
+.brand{display:flex; align-items:baseline; gap:10px;}
+.brand h1{font:600 19px "Barlow Condensed"; letter-spacing:.06em; text-transform:uppercase;}
+.brand .sub{color:var(--faint); font-size:12px;}
+#hdrZone{color:var(--dim); font-size:13px;}
+#hdrZone b{color:var(--text); font-weight:500;}
+.pills{margin-left:auto; display:flex; gap:6px;}
+.pill{font:400 11px "IBM Plex Mono"; padding:3px 9px; border-radius:20px; border:1px solid var(--line); color:var(--dim);}
+.pill.ok{border-color:#3d5a3a; color:var(--ok);}
+.pill.warn{border-color:#6b5a2a; color:var(--warn);}
+.pill.mock{border-color:var(--ember-deep); color:var(--ember);}
+
+/* ---------- timebar (signature: matrix fused with scrubber) ---------- */
+#timebar{padding:10px 14px 0; background:var(--panel); border-bottom:1px solid var(--line);}
+.timerow{display:grid; grid-template-columns:96px 1fr; gap:10px;}
+#ydChip{border:1px dashed var(--line); border-radius:var(--radius); padding:6px 8px; text-align:center; align-self:stretch;}
+#ydChip .lbl{font:600 10px "Barlow Condensed"; letter-spacing:.14em; text-transform:uppercase; color:var(--faint);}
+#ydChip .val{font:400 11px "IBM Plex Mono"; color:var(--dim); margin-top:3px;}
+#ydChip .val .hit{color:var(--ok);}
+#matrix{display:grid; grid-template-columns:repeat(7,1fr); gap:8px;}
+.day{background:var(--panel2); border:1px solid var(--line); border-radius:var(--radius) var(--radius) 0 0; border-bottom:none; padding:7px 6px 9px; text-align:center; cursor:pointer; position:relative;}
+.day:focus-visible{outline:2px solid var(--ember); outline-offset:2px;}
+.day .dow{font:600 11px "Barlow Condensed"; letter-spacing:.12em; text-transform:uppercase; color:var(--dim);}
+.day .date{font-size:11px; color:var(--faint);}
+.day .tier{font:600 20px "Barlow Condensed"; margin-top:2px; letter-spacing:.03em;}
+.day .wx{font-size:11px; color:var(--dim); margin-top:1px;}
+.day.ghost{cursor:default;}
+.day.ghost .tier{color:var(--faint);}
+.day.active{background:#262e3a; border-color:var(--ember-deep);}
+.day.active::after{content:""; position:absolute; left:0; right:0; bottom:-2px; height:3px; background:var(--ember); border-radius:2px;}
+.scrubrow{display:grid; grid-template-columns:96px 1fr; gap:10px; padding:6px 0 8px;}
+#scrub{-webkit-appearance:none; appearance:none; background:transparent; height:18px; cursor:pointer;
+  width:calc((100% + 8px) * 6 / 7 + 14px); margin-left:calc((100% - 48px) / 14 - 7px);}
+#scrub::-webkit-slider-runnable-track{height:4px; background:var(--line); border-radius:2px;}
+#scrub::-webkit-slider-thumb{-webkit-appearance:none; width:14px; height:14px; border-radius:50%; background:var(--ember); border:0; margin-top:-5px;}
+#scrub::-moz-range-track{height:4px; background:var(--line); border-radius:2px;}
+#scrub::-moz-range-thumb{width:14px; height:14px; border-radius:50%; background:var(--ember); border:0;}
+#scrub:focus-visible{outline:2px solid var(--ember); outline-offset:2px;}
+#scrubTicks{grid-column:2; display:grid; grid-template-columns:repeat(7,1fr); gap:8px; text-align:center; font:400 10px "IBM Plex Mono"; color:var(--faint); margin-top:2px;}
+#scrubTicks span.active{color:var(--ember);}
+
+/* ---------- main columns ---------- */
+#main{display:grid; grid-template-columns:216px 1fr 300px; min-height:0;}
+
+/* left rail */
+#rail{background:var(--panel); border-right:1px solid var(--line); padding:12px; overflow-y:auto; display:flex; flex-direction:column; gap:16px;}
+.sect .hd{font:600 11px "Barlow Condensed"; letter-spacing:.16em; text-transform:uppercase; color:var(--faint); margin-bottom:7px;}
+.chk{display:flex; align-items:center; gap:8px; padding:3px 0; color:var(--dim); cursor:pointer; font-size:13px;}
+.chk input{accent-color:var(--ember);}
+.rowline{display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:13px; color:var(--dim); padding:3px 0;}
+#railRadius{width:100%; accent-color:var(--ember);}
+.mono{font-family:"IBM Plex Mono"; font-size:11px;}
+#chips{display:flex; flex-wrap:wrap; gap:5px; margin-top:7px;}
+.chip{display:inline-flex; align-items:center; gap:5px; background:#2a3442; border:1px solid #3a4a5e; color:#cfe0f2; border-radius:20px; padding:2px 8px; font-size:11px;}
+.chip button{all:unset; cursor:pointer; color:#8fa5bf; font-size:12px; line-height:1;}
+.chip button:hover{color:#fff;}
+#capNote{font-size:11px; color:var(--faint); margin-top:5px;}
+select,.btn{background:var(--panel2); color:var(--text); border:1px solid var(--line); border-radius:var(--radius); font:inherit; font-size:12px; padding:5px 8px;}
+.btn{cursor:pointer;}
+.btn:hover{border-color:var(--ember-deep); color:var(--ember);}
+.btn:focus-visible{outline:2px solid var(--ember); outline-offset:1px;}
+.btn.small{padding:3px 7px; font-size:11px;}
+.favrow{display:flex; gap:5px; margin-top:6px; flex-wrap:wrap;}
+#favSelect{flex:1; min-width:0;}
+.modelchips{display:flex; flex-wrap:wrap; gap:5px;}
+.mchip{font-size:11px; padding:2px 8px; border-radius:20px; border:1px solid var(--line); color:var(--dim);}
+.mchip.on{border-color:var(--ember-deep); color:var(--ember);}
+
+/* map */
+#mapwrap{position:relative; min-height:0;}
+#map{position:absolute; inset:0; background:#161b22;}
+#legend{position:absolute; left:10px; bottom:10px; z-index:5; background:rgba(20,24,30,.92); border:1px solid var(--line); border-radius:var(--radius); padding:7px 10px; display:flex; gap:10px; align-items:center;}
+#legend .sw{display:inline-flex; align-items:center; gap:5px; font-size:11px; color:var(--dim);}
+#legend i{width:11px; height:11px; border-radius:3px; display:inline-block;}
+#mapHint{position:absolute; top:10px; left:10px; z-index:5; background:rgba(20,24,30,.92); border:1px solid var(--line); border-radius:var(--radius); padding:6px 10px; font-size:12px; color:var(--dim);}
+
+/* RAWS markers (DOM) */
+.raws{width:14px; height:14px; border-radius:50%; border:2px solid #dfe8f2; background:#5c6b7d; cursor:pointer; position:relative;}
+.raws.fs{background:#3f7d5a;}
+.raws.sel{background:var(--ember); border-color:#fff;}
+.raws.sel::before{content:""; position:absolute; inset:-6px; border-radius:50%; border:2px solid var(--ember); opacity:.7; animation:pulse 2s ease-out infinite;}
+.raws:hover{border-color:var(--ember);}
+@keyframes pulse{0%{transform:scale(.55); opacity:.8}70%{transform:scale(1.25); opacity:0}100%{opacity:0}}
+
+/* right panel */
+#panel{position:relative; background:var(--panel); border-left:1px solid var(--line); overflow:hidden;}
+.pscroll{position:absolute; inset:0; overflow-y:auto; padding:14px;}
+#pnlEmpty{color:var(--faint); font-size:13px; line-height:1.6; padding-top:18px;}
+#pnlEmpty .big{font:600 15px "Barlow Condensed"; letter-spacing:.1em; text-transform:uppercase; color:var(--dim); margin-bottom:6px;}
+#pnlDayHead{font:600 15px "Barlow Condensed"; letter-spacing:.08em; text-transform:uppercase;}
+#zoneMeta{font-size:12px; color:var(--faint); margin:2px 0 10px;}
+#refBadge{display:none; margin-left:6px; font:600 10px "Barlow Condensed"; letter-spacing:.1em; color:var(--ember); border:1px solid var(--ember-deep); border-radius:20px; padding:1px 7px; vertical-align:2px;}
+.pgroup{margin-bottom:13px;}
+.pgroup .hd{font:600 10px "Barlow Condensed"; letter-spacing:.16em; text-transform:uppercase; color:var(--faint); margin-bottom:4px;}
+.pgroup .bd{font:400 12px "IBM Plex Mono"; color:var(--dim); line-height:1.7;}
+.pgroup .bd b{color:var(--text); font-weight:400;}
+.pbtns{display:flex; flex-direction:column; gap:6px; margin:14px 0;}
+#pnlNote{font-size:11px; color:var(--faint); border-top:1px solid var(--line); padding-top:8px;}
+
+/* drawer */
+#drawer{position:absolute; inset:0; background:var(--panel2); border-left:1px solid var(--line); transform:translateX(102%); transition:transform .22s ease; z-index:8; padding:14px; overflow-y:auto;}
+#drawer.open{transform:translateX(0);}
+#drawer .dhd{display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;}
+#drawerTitle{font:600 14px "Barlow Condensed"; letter-spacing:.1em; text-transform:uppercase;}
+.spark{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:8px; margin-bottom:10px;}
+.spark .cap{font-size:11px; color:var(--faint); margin-bottom:4px;}
+
+/* thresholds modal */
+#threshModal{position:fixed; inset:0; background:rgba(8,10,13,.6); display:none; align-items:center; justify-content:center; z-index:20;}
+#threshModal.open{display:flex;}
+.tbox{width:380px; background:var(--panel2); border:1px solid var(--line); border-radius:8px; padding:16px;}
+.tbox h2{font:600 15px "Barlow Condensed"; letter-spacing:.1em; text-transform:uppercase; margin-bottom:4px;}
+.tbox .note{font-size:12px; color:var(--faint); margin-bottom:12px;}
+.trow{display:grid; grid-template-columns:1fr 90px 46px; gap:10px; align-items:center; font-size:12px; color:var(--dim); padding:6px 0;}
+.trow input{accent-color:var(--ember);}
+.trow .v{font-family:"IBM Plex Mono"; font-size:11px; color:var(--text); text-align:right;}
+
+#toast{position:fixed; left:50%; bottom:26px; transform:translateX(-50%) translateY(8px); background:#262e3a; border:1px solid var(--ember-deep); color:var(--text); border-radius:var(--radius); padding:8px 14px; font-size:13px; opacity:0; pointer-events:none; transition:opacity .18s, transform .18s; z-index:30;}
+#toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
+
+@media (prefers-reduced-motion: reduce){
+  .raws.sel::before{animation:none;}
+  #drawer,#toast{transition:none;}
+}
+
+
+/* ---- v1 wiring additions ---- */
+#tip{position:absolute; z-index:30; pointer-events:none; background:var(--panel,#20262e); border:1px solid var(--line,#39414c);
+  border-radius:6px; padding:6px 9px; font:500 12px Barlow; color:var(--ink,#e8e4da); display:none; max-width:260px;}
+#tip .t2{font:400 11px "IBM Plex Mono"; color:var(--faint,#8a93a0); margin-top:2px;}
+#banner{position:absolute; left:50%; top:14px; transform:translateX(-50%); z-index:40; display:none;
+  background:#3a2020; border:1px solid #7a3b3b; color:#f0d9d9; padding:8px 14px; border-radius:8px; font:500 13px Barlow;}
+#pinList .pin{display:flex; justify-content:space-between; align-items:center; padding:4px 6px; border:1px solid var(--line,#39414c);
+  border-radius:6px; margin-top:6px; cursor:pointer; font:500 12px Barlow;}
+#pinList .pin:hover{border-color:var(--ember,#e3883a);}
+#pinList .pin .x{color:var(--faint,#8a93a0); padding:0 4px; cursor:pointer;}
+#zSearch{background:var(--panel,#20262e); border:1px solid var(--line,#39414c); color:var(--ink,#e8e4da);
+  border-radius:6px; padding:5px 8px; font:400 12px "IBM Plex Mono"; width:110px;}
+.tierBig{display:inline-block; min-width:86px; text-align:center; padding:10px 12px; border-radius:8px;
+  font:600 22px "Barlow Condensed"; letter-spacing:.5px; color:#14181d;}
+.drvRow{display:flex; justify-content:space-between; padding:5px 0; border-bottom:1px dashed var(--line,#39414c); font:400 13px Barlow;}
+.drvRow .mono{color:var(--faint,#8a93a0);}
+.chipDl{margin-left:4px;}
+.pill.bad{border-color:#7a3b3b; color:#e07a6a;}
+#pnlDayHead{font:600 13px "Barlow Condensed"; letter-spacing:.14em; text-transform:uppercase; color:var(--faint); padding:12px 14px 4px;}
+#zoneMeta{padding:0 14px 10px; font:400 13px Barlow; color:var(--dim);}
+#zoneMeta b{color:var(--text);}
+.pgroup{padding:10px 14px; border-top:1px solid var(--line);}
+#pnlNote{padding:10px 14px; font:400 11px Barlow; color:var(--faint); line-height:1.5;}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <header>
+    <div class="brand"><h1>Fire potential briefing</h1><span class="sub">national · v1</span></div>
+    <div id="hdrZone">loading…</div>
+    <div class="pills">
+      <input id="zSearch" placeholder="zone id ⏎" aria-label="Zone search">
+      <button class="btn small" id="btnHome">⌂ ORZ693</button>
+      <span class="pill ok" id="pillRatings">ratings —</span>
+      <span class="pill ok" id="pillModel">model —</span>
+      <span class="pill ok" id="pillZones">zones —</span>
+      <span class="pill warn" id="pillPointset">poi —</span>
+    </div>
+  </header>
+
+  <div id="timebar">
+    <div class="timerow">
+      <div id="ydChip">
+        <div class="lbl">Yesterday</div>
+        <div class="val" id="ydVal">verif — <span class="mono" style="color:var(--faint)">needs 2 runs</span></div>
+      </div>
+      <div id="matrix"></div>
+    </div>
+    <div class="scrubrow">
+      <div></div>
+      <input type="range" id="scrub" min="0" max="6" step="1" value="0" aria-label="Forecast day">
+      <div id="scrubTicks"></div>
+    </div>
+  </div>
+
+  <div id="main">
+
+    <nav id="rail">
+      <div class="sect">
+        <div class="hd">Layers</div>
+        <label class="chk"><input type="checkbox" id="lyrZones" checked> FWZ choropleth</label>
+        <label class="chk"><input type="checkbox" id="lyrDl" checked> Dry lightning ⚡ (T3+)</label>
+        <label class="chk"><input type="checkbox" id="lyrAlerts" disabled> RFW alerts <span class="mono" style="color:var(--faint)">(deep pull)</span></label>
+        <label class="chk"><input type="checkbox" id="lyrRaws" disabled> RAWS stations <span class="mono" style="color:var(--faint)">(deep pull)</span></label>
+      </div>
+
+      <div class="sect">
+        <div class="hd">Pinned zones</div>
+        <div id="pinList"></div>
+        <button class="btn small" id="btnPinCur" style="margin-top:8px; width:100%">☆ Pin selected zone</button>
+      </div>
+
+      <div class="sect">
+        <div class="hd">National composite</div>
+        <div style="font:400 12px Barlow; color:var(--faint); line-height:1.5">
+          Temp / RHmin / RH-recovery vs 30-yr normals (σ), wind · gust · PoP ladders,
+          dry lightning via CAPE. HDW, Haines, LAL, RFW and FEMS fuels arrive with the
+          live deep pull — a refined zone can rate differently.
+        </div>
+        <button class="btn" id="btnRefine" style="width:100%; margin-top:10px">Refine zone — live deep pull ▸</button>
+      </div>
+    </nav>
+
+    <div id="mapwrap">
+      <div id="map"></div>
+      <div id="banner"></div>
+      <div id="tip"></div>
+      <div id="mapHint">Click a fire weather zone to brief it</div>
+      <div id="legend"></div>
+    </div>
+
+    <aside id="panel">
+      <div class="pscroll" id="pnlEmpty">
+        <div class="hd" style="padding:14px">No zone selected</div>
+        <div style="padding:0 14px; font:400 13px Barlow; color:var(--faint)">Click the map, search a zone id, or use a pin.</div>
+      </div>
+      <div class="pscroll" id="pnlBody" style="display:none">
+        <div id="pnlDayHead">today</div>
+        <div id="zoneMeta"></div>
+        <div class="pgroup">
+          <div class="hd">National rating</div>
+          <div class="bd" id="pnlRating"></div>
+        </div>
+        <div class="pgroup">
+          <div class="hd">Drivers <span class="mono" id="pnlBasis">national composite</span></div>
+          <div class="bd" id="pnlDrivers"></div>
+        </div>
+        <div style="padding:10px 14px; display:flex; flex-direction:column; gap:8px">
+          <button class="btn" id="btnWkChart">7-day score chart ▸</button>
+        </div>
+        <div id="pnlNote">National precompute (single model, weather-anomaly composite).
+          Live deep pull adds multi-model consensus, HDW/Haines, and your FEMS fuels — next increment.</div>
+      </div>
+
+      <div id="drawer" aria-hidden="true">
+        <div class="dhd">
+          <span id="drawerTitle">7-day score</span>
+          <button class="btn small" id="btnDrawerClose">Close ✕</button>
+        </div>
+        <div id="drawerBody"></div>
+      </div>
+    </aside>
+
+  </div>
+</div>
+
+<div id="toast" role="status"></div>
+
+<script>
+"use strict";
+/* ================= CONFIG (constants before any boot code — TDZ discipline) ================= */
+const PATH_RATINGS  = "ratings/latest.json";
+const PATH_ZONES    = "data/zones.geojson";
+const SCHEMA_OK     = "fpb-national-1";
+const NDAYS         = 7;
+/* 5-tier scale aligned to the engine's ADJ ladder (skeleton's 6-tier mock retired) */
+const TIER_COLORS   = ["#4f7d63","#e0bd55","#e3883a","#d94f3d","#93306f"];
+const ADJ           = ["LOW","MODERATE","HIGH","VERY HIGH","EXTREME"];
+const ADJ_S         = ["LOW","MOD","HIGH","V HIGH","EXTR"];
+const NODATA_COLOR  = "#39414c";
+const FILL_OPACITY  = 0.50;
+const DL_MIN        = 3;                       /* ⚡ marker threshold */
+const STALE_OK_H    = 26;                      /* ratings age pill thresholds */
+const STALE_WARN_H  = 30;
+const HOME_ZONE     = "ORZ693";
+const PIN_SEED      = ["ORZ693","ORZ694","ORZ695"];
+const STORE_PINS    = "fpb.map.pins.v1";
+const CONUS_BOUNDS  = [[-125.5, 24.2], [-66.5, 49.8]];
+const HOME_ZOOM     = 6.3;
+const DRV_LAB       = { tmax:"Temperature anomaly", rhmin:"RH-min anomaly", rhrec:"Poor RH recovery",
+                        wind:"Sustained wind", gust:"Gusts", pop:"Dry pattern (low PoP)", dryltg:"Dry lightning" };
+const BASEMAP_STYLE = {
+  version: 8,
+  sources: { carto: { type:"raster",
+    tiles:["https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+           "https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+           "https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png"],
+    tileSize:256, attribution:"© OpenStreetMap contributors © CARTO" } },
+  layers: [ { id:"bg", type:"background", paint:{ "background-color":"#161b22" } },
+            { id:"carto", type:"raster", source:"carto", paint:{ "raster-opacity":0.75 } } ]
+};
+
+/* ================= [pure-begin] view-agnostic helpers (node-tested) ================= */
+function tierColor(t){ return (t==null||t<0||t>4)?NODATA_COLOR:TIER_COLORS[t]; }
+function scoreTxt(s){ return s==null?"—":(Math.round(s*100)/100).toFixed(2); }
+function fmtAge(genIso, nowMs){
+  const t = Date.parse(genIso||"");
+  if (isNaN(t)) return { txt:"ratings —", cls:"bad" };
+  const h = (nowMs - t)/3600e3;
+  const txt = h < 1 ? "ratings "+Math.max(0,Math.round(h*60))+"m" : "ratings "+Math.round(h)+"h";
+  return { txt, cls: h<STALE_OK_H?"ok":h<STALE_WARN_H?"warn":"bad" };
+}
+function dayLabel(iso, idx){
+  const d = new Date(iso+"T12:00:00Z");
+  const dow = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][d.getUTCDay()];
+  return idx===0 ? "Today" : dow+" "+d.getUTCDate();
+}
+function normalizeZoneQuery(s){
+  s = String(s||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+  let m = /^([A-Z]{2})Z?(\d{1,3})$/.exec(s);
+  if (!m) return null;
+  return m[1]+"Z"+m[2].padStart(3,"0");
+}
+function fillExpr(day){
+  return ["match", ["coalesce", ["get","t"+day], -1],
+    0,TIER_COLORS[0], 1,TIER_COLORS[1], 2,TIER_COLORS[2], 3,TIER_COLORS[3], 4,TIER_COLORS[4],
+    NODATA_COLOR];
+}
+function dlFilter(day){ return [">=", ["coalesce", ["get","dl"+day], 0], DL_MIN]; }
+function ringBboxCenter(ring){
+  let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;
+  for (const p of ring){ if(p[0]<x0)x0=p[0]; if(p[0]>x1)x1=p[0]; if(p[1]<y0)y0=p[1]; if(p[1]>y1)y1=p[1]; }
+  return [(x0+x1)/2,(y0+y1)/2];
+}
+/* join ratings into feature props (t0.. / dl0..) and derive centroids for ⚡ + fly-to */
+function joinRatings(features, zonesMap, ndays){
+  let rated = 0; const centroids = {}; const names = {};
+  for (const f of features){
+    const id = f.properties && f.properties.id;
+    if (!id) continue;
+    names[id] = f.properties.name || "";
+    const outer = f.geometry.type === "Polygon" ? f.geometry.coordinates[0] : f.geometry.coordinates[0][0];
+    centroids[id] = ringBboxCenter(outer);
+    const rec = zonesMap[id];
+    if (!rec) continue;
+    rated++;
+    for (let i = 0; i < ndays; i++){
+      f.properties["t"+i]  = rec.t[i]==null?-1:rec.t[i];
+      f.properties["dl"+i] = rec.dl[i]==null?0:rec.dl[i];
+    }
+  }
+  return { rated, centroids, names };
+}
+function dlPointsGeojson(centroids, zonesMap, ndays){
+  const feats = [];
+  for (const id in zonesMap){
+    const c = centroids[id]; if (!c) continue;
+    const props = { id };
+    for (let i = 0; i < ndays; i++) props["dl"+i] = zonesMap[id].dl[i]==null?0:zonesMap[id].dl[i];
+    feats.push({ type:"Feature", properties:props, geometry:{ type:"Point", coordinates:c } });
+  }
+  return { type:"FeatureCollection", features:feats };
+}
+function pinsLoad(storage){
+  try { const v = JSON.parse(storage.getItem(STORE_PINS)||"null"); if (Array.isArray(v)) return v; } catch(e){}
+  return PIN_SEED.slice();
+}
+function pinsToggle(list, id){
+  const i = list.indexOf(id);
+  if (i>=0){ const c=list.slice(); c.splice(i,1); return c; }
+  return list.concat([id]);
+}
+/* ================= [pure-end] ================= */
+
+function $(id){ return document.getElementById(id); }
+let toastTimer = null;
+function toast(msg){
+  const t = $("toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(toastTimer); toastTimer = setTimeout(()=>t.classList.remove("show"), 2600);
+}
+function banner(msg){ const b=$("banner"); b.textContent=msg; b.style.display="block"; }
+
+const S = { day:0, sel:null, doc:null, names:{}, centroids:{}, pins:[] };
+let map = null;
+
+/* ---------- rendering ---------- */
+function buildTicks(){
+  const ticks = $("scrubTicks"); ticks.innerHTML = "";
+  for (let i = 0; i < NDAYS; i++){
+    const s = document.createElement("span");
+    s.textContent = i === 0 ? "today" : "+" + i;
+    if (i === S.day) s.className = "active";
+    s.addEventListener("click", ()=>setDay(i));
+    ticks.appendChild(s);
+  }
+}
+function renderMatrix(){
+  const m = $("matrix"); m.innerHTML = "";
+  if (!S.doc){ return; }
+  const rec = S.sel ? S.doc.zones[S.sel] : null;
+  for (let i = 0; i < NDAYS; i++){
+    const card = document.createElement("div");
+    card.className = "day" + (rec ? "" : " ghost") + (rec && i === S.day ? " active" : "");
+    card.setAttribute("role","button");
+    card.setAttribute("tabindex", rec ? "0" : "-1");
+    const d = S.doc.days[i];
+    const dow = dayLabel(d, i).split(" ")[0].toUpperCase();
+    const date = d.slice(5).replace("-","/");
+    if (rec){
+      const t = rec.t[i], dl = rec.dl[i]||0;
+      card.innerHTML =
+        '<div class="dow">' + (i===0?"TODAY":dow) + '</div>' +
+        '<div class="date">' + date + '</div>' +
+        '<div class="tier" style="color:'+tierColor(t)+'">' + (t==null?"—":"T"+t) +
+          (dl>=DL_MIN?'<span class="chipDl">⚡</span>':"") + '</div>' +
+        '<div class="wx mono">' + scoreTxt(rec.s[i]) + '</div>';
+      card.addEventListener("click", ()=>setDay(i));
+      card.addEventListener("keydown", e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); setDay(i);} });
+    } else {
+      card.innerHTML =
+        '<div class="dow">' + (i===0?"TODAY":dow) + '</div>' +
+        '<div class="date">' + date + '</div>' +
+        '<div class="tier">—</div><div class="wx">&nbsp;</div>';
+    }
+    m.appendChild(card);
+  }
+}
+function renderPanel(){
+  if (!S.sel){ $("pnlEmpty").style.display="block"; $("pnlBody").style.display="none"; return; }
+  $("pnlEmpty").style.display="none"; $("pnlBody").style.display="block";
+  const rec = S.doc.zones[S.sel];
+  $("pnlDayHead").textContent = dayLabel(S.doc.days[S.day], S.day) + " · " + S.doc.days[S.day];
+  $("zoneMeta").innerHTML = "<b>"+S.sel+"</b> — "+(S.names[S.sel]||"")+
+    (S.pins.includes(S.sel)?" <span style='color:var(--ember)'>★</span>":"");
+  if (!rec){
+    $("pnlRating").innerHTML = "<div style='color:var(--faint)'>No national rating — outside the fetched climatology set (tranche 2+).</div>";
+    $("pnlDrivers").innerHTML = ""; return;
+  }
+  const t = rec.t[S.day], dl = rec.dl[S.day]||0, drv = rec.drv[S.day]||"";
+  $("pnlRating").innerHTML =
+    "<span class='tierBig' style='background:"+tierColor(t)+"'>"+(t==null?"—":ADJ[t])+"</span>"+
+    "<div style='margin-top:8px' class='mono'>composite "+scoreTxt(rec.s[S.day])+
+    (t!=null?" → T"+t:"")+"</div>";
+  let rows = "";
+  if (drv) rows += "<div class='drvRow'><span>Top driver</span><span>"+(DRV_LAB[drv]||drv)+"</span></div>";
+  rows += "<div class='drvRow'><span>Dry lightning</span><span>"+(dl>=DL_MIN?("⚡ T"+dl):(dl>0?("T"+dl):"—"))+"</span></div>";
+  rows += "<div class='drvRow'><span>Model</span><span class='mono'>"+S.doc.model+"</span></div>";
+  $("pnlDrivers").innerHTML = rows;
+}
+function renderPins(){
+  $("pinList").innerHTML = S.pins.map(id=>
+    "<div class='pin' data-id='"+id+"'><span>"+id+"</span><span class='x' data-x='"+id+"'>✕</span></div>").join("") ||
+    "<div style='color:var(--faint); font:400 12px Barlow'>none pinned</div>";
+  Array.from($("pinList").querySelectorAll(".pin")).forEach(el=>{
+    el.addEventListener("click", e=>{
+      if (e.target.dataset.x){ S.pins = pinsToggle(S.pins, e.target.dataset.x);
+        localStorage.setItem(STORE_PINS, JSON.stringify(S.pins)); renderPins(); renderPanel(); return; }
+      flyToZone(el.dataset.id);
+    });
+  });
+  $("btnPinCur").textContent = (S.sel && S.pins.includes(S.sel)) ? "★ Unpin selected zone" : "☆ Pin selected zone";
+}
+function renderLegend(){
+  $("legend").innerHTML = ADJ_S.map((n,i)=>
+    "<span class='sw'><i style='background:"+TIER_COLORS[i]+"'></i>"+n+"</span>").join("")+
+    "<span class='sw'><i style='background:"+NODATA_COLOR+"'></i>NO DATA</span>"+
+    "<span class='sw'>⚡ T"+DL_MIN+"+</span>";
+}
+function renderPills(){
+  const age = fmtAge(S.doc.generated, Date.now());
+  const pr = $("pillRatings"); pr.textContent = age.txt; pr.className = "pill "+age.cls;
+  $("pillModel").textContent = S.doc.model;
+  const rated = Object.keys(S.doc.zones).length;
+  $("pillZones").textContent = rated+" rated · "+(S.doc.failed?S.doc.failed.length:0)+" failed";
+  $("pillPointset").textContent = S.doc.pointset_version||"poi —";
+  $("pillPointset").className = "pill ok";
+}
+
+/* ---------- map ---------- */
+function setDay(i){
+  S.day = Math.max(0, Math.min(NDAYS-1, i));
+  $("scrub").value = String(S.day);
+  Array.from($("scrubTicks").children).forEach((el,k)=>el.classList.toggle("active", k===S.day));
+  renderMatrix();
+  if (map && map.getLayer && map.getLayer("zones-fill")){
+    map.setPaintProperty("zones-fill","fill-color", fillExpr(S.day));
+    map.setFilter("dl-pts", dlFilter(S.day));
+  }
+  renderPanel();
+}
+function selectZone(id){
+  S.sel = id;
+  $("hdrZone").textContent = id ? (id+" — "+(S.names[id]||"")) : "no zone selected — click the map";
+  if (map && map.getLayer && map.getLayer("zones-sel"))
+    map.setFilter("zones-sel", ["==", ["get","id"], id||""]);
+  renderMatrix(); renderPanel(); renderPins();
+}
+function flyToZone(id){
+  const c = S.centroids[id];
+  if (!c){ toast(id+" not in the boundary file"); return; }
+  selectZone(id);
+  map.flyTo({ center:c, zoom:HOME_ZOOM, speed:1.6 });
+}
+function addAppLayers(zonesGeo, dlGeo){
+  map.addSource("zones", { type:"geojson", data:zonesGeo });
+  map.addLayer({ id:"zones-fill", type:"fill", source:"zones",
+    paint:{ "fill-color": fillExpr(0), "fill-opacity": FILL_OPACITY } });
+  map.addLayer({ id:"zones-line", type:"line", source:"zones",
+    paint:{ "line-color":"#0f1318", "line-width":0.6 } });
+  map.addLayer({ id:"zones-sel", type:"line", source:"zones",
+    filter:["==",["get","id"],""], paint:{ "line-color":"#e8e4da", "line-width":2.2 } });
+  map.addSource("dl", { type:"geojson", data:dlGeo });
+  map.addLayer({ id:"dl-pts", type:"circle", source:"dl", filter:dlFilter(0),
+    paint:{ "circle-radius":3.5, "circle-color":"#ffd75e", "circle-stroke-color":"#14181d", "circle-stroke-width":1 } });
+
+  map.on("click","zones-fill", e=>{
+    const f = e.features && e.features[0]; if (!f) return;
+    selectZone(f.properties.id);
+  });
+  const tip = $("tip");
+  map.on("mousemove","zones-fill", e=>{
+    const f = e.features && e.features[0]; if (!f) return;
+    map.getCanvas().style.cursor = "pointer";
+    const id = f.properties.id, rec = S.doc.zones[id];
+    const t = rec ? rec.t[S.day] : null;
+    tip.style.display="block";
+    tip.style.left=(e.point.x+14)+"px"; tip.style.top=(e.point.y+14)+"px";
+    tip.innerHTML = "<b>"+id+"</b> — "+(f.properties.name||"")+
+      "<div class='t2'>"+(t==null?"no rating":("T"+t+" · "+ADJ[t]+" · "+scoreTxt(rec.s[S.day])))+"</div>";
+  });
+  map.on("mouseleave","zones-fill", ()=>{ map.getCanvas().style.cursor=""; tip.style.display="none"; });
+}
+
+/* ---------- drawer ---------- */
+function sparkSVG(vals, days){
+  const W=280,H=120,P=18;
+  const vmax = Math.max(4, ...vals.filter(v=>v!=null));
+  const x=i=>P+i*(W-2*P)/(vals.length-1), y=v=>H-P-(v/vmax)*(H-2*P);
+  let path=""; vals.forEach((v,i)=>{ if(v==null)return; path+=(path?"L":"M")+x(i).toFixed(1)+" "+y(v).toFixed(1)+" "; });
+  const dots = vals.map((v,i)=>v==null?"":"<circle cx='"+x(i).toFixed(1)+"' cy='"+y(v).toFixed(1)+
+    "' r='3.4' fill='"+tierColor(S.doc.zones[S.sel].t[i])+"'/>").join("");
+  const labs = days.map((d,i)=>"<text x='"+x(i).toFixed(1)+"' y='"+(H-2)+"' text-anchor='middle' font-size='9' fill='#8a93a0'>"+dayLabel(d,i).replace("Today","Tdy")+"</text>").join("");
+  return "<svg viewBox='0 0 "+W+" "+H+"' width='100%'><path d='"+path+"' fill='none' stroke='#e8e4da' stroke-width='1.4'/>"+dots+labs+"</svg>";
+}
+function openDrawer(){
+  if (!S.sel || !S.doc.zones[S.sel]) return;
+  const rec = S.doc.zones[S.sel];
+  $("drawerTitle").textContent = S.sel+" · 7-day composite";
+  $("drawerBody").innerHTML = sparkSVG(rec.s, S.doc.days)+
+    "<div style='font:400 12px Barlow; color:var(--faint); margin-top:6px'>Dot color = day tier. Live deep-pull charts (multi-model wx, fuels) arrive next increment.</div>";
+  $("drawer").setAttribute("aria-hidden","false"); $("drawer").classList.add("open");
+}
+function closeDrawer(){ $("drawer").setAttribute("aria-hidden","true"); $("drawer").classList.remove("open"); }
+
+/* ---------- boot ---------- */
+async function loadData(){
+  const [rRes, zRes] = await Promise.all([
+    fetch(PATH_RATINGS, { cache:"no-store" }),
+    fetch(PATH_ZONES)
+  ]);
+  if (!rRes.ok) throw new Error("ratings/latest.json "+rRes.status+" — has the workflow run?");
+  if (!zRes.ok) throw new Error("data/zones.geojson "+zRes.status+" — run tools/prep_map.js and commit");
+  const doc = await rRes.json();
+  const geo = await zRes.json();
+  if (doc.schema !== SCHEMA_OK) toast("ratings schema '"+doc.schema+"' ≠ "+SCHEMA_OK);
+  return { doc, geo };
+}
+function boot(){
+  S.pins = pinsLoad(localStorage);
+  renderPins(); renderLegend();
+  loadData().then(({doc, geo})=>{
+    S.doc = doc;
+    const j = joinRatings(geo.features, doc.zones, NDAYS);
+    S.centroids = j.centroids; S.names = j.names;
+    renderPills(); buildTicks();
+    $("hdrZone").textContent = "no zone selected — click the map";
+    if (typeof maplibregl === "undefined"){ banner("MapLibre failed to load — check network"); return; }
+    map = new maplibregl.Map({ container:"map", style:BASEMAP_STYLE,
+      bounds:CONUS_BOUNDS, fitBoundsOptions:{ padding:20 }, attributionControl:true });
+    map.addControl(new maplibregl.NavigationControl({ showCompass:false }), "top-right");
+    map.on("load", ()=>{
+      addAppLayers(geo, dlPointsGeojson(j.centroids, doc.zones, NDAYS));
+      setDay(0);
+      if (doc.zones[HOME_ZONE]) selectZone(HOME_ZONE);
+      renderPills();
+    });
+    setInterval(()=>{ if (S.doc) { const a=fmtAge(S.doc.generated, Date.now());
+      const pr=$("pillRatings"); pr.textContent=a.txt; pr.className="pill "+a.cls; } }, 60000);
+  }).catch(e=>{ banner(String(e.message||e)); $("hdrZone").textContent="data load failed"; });
+
+  $("scrub").addEventListener("input", e=>setDay(+e.target.value));
+  $("btnHome").addEventListener("click", ()=>flyToZone(HOME_ZONE));
+  $("zSearch").addEventListener("keydown", e=>{
+    if (e.key !== "Enter") return;
+    const id = normalizeZoneQuery(e.target.value);
+    if (!id){ toast("format: ORZ693"); return; }
+    flyToZone(id); e.target.value="";
+  });
+  $("btnPinCur").addEventListener("click", ()=>{
+    if (!S.sel){ toast("select a zone first"); return; }
+    S.pins = pinsToggle(S.pins, S.sel);
+    localStorage.setItem(STORE_PINS, JSON.stringify(S.pins));
+    renderPins(); renderPanel();
+  });
+  $("btnRefine").addEventListener("click", ()=>toast("Live deep pull (multi-model wx, FEMS fuels, HDW/Haines) ships next increment"));
+  $("btnWkChart").addEventListener("click", openDrawer);
+  $("btnDrawerClose").addEventListener("click", closeDrawer);
+  $("lyrZones").addEventListener("change", e=>{
+    ["zones-fill","zones-line"].forEach(l=>map&&map.setLayoutProperty(l,"visibility", e.target.checked?"visible":"none"));
+  });
+  $("lyrDl").addEventListener("change", e=>{
+    map&&map.setLayoutProperty("dl-pts","visibility", e.target.checked?"visible":"none");
+  });
+}
+boot();
+</script>
+</body>
+</html>
