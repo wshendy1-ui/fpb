@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /* =========================================================================
-   FPB — rate_national.js (v1)
+   FPB — rate_national.js (v1.1)
    Daily national zone ratings: forecast (Open-Meteo, single model, batched
    multi-point) × precomputed climatology (climo-fetcher output) → per-zone
    per-day composite tier via the extracted v83 engine.
@@ -17,6 +17,10 @@
           --out ratings [--model gfs_seamless] [--batch 40] [--limit N]
           [--states OR,WA] [--days 7]
    Env: OM_API_KEY (or .env alongside), OM_BASE (tests: mock server URL)
+   v1.1: batch-failure reasons logged; 429s retry the same batch (max 4,
+   backoff --backoff429 ms) and sustained 429 aborts WITHOUT writing output
+   (yesterday's latest.json stays live); size-mismatch responses fall back
+   to singles instead of looping.
    ========================================================================= */
 "use strict";
 const fs = require("fs");
@@ -53,6 +57,8 @@ const BATCH     = Math.max(1, +arg("batch", 40));
 const LIMIT     = +arg("limit", 0);
 const STATES    = (arg("states", "") || "").split(",").map(s => s.trim().toUpperCase()).filter(Boolean);
 const NDAYS     = Math.min(7, Math.max(1, +arg("days", 7)));
+const BACKOFF   = Math.max(0, +arg("backoff429", 60000));
+const errStr = e => String((e && e.message) || e).slice(0, 140);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 /* trimmed request — everything the national v1 composite consumes, nothing more */
@@ -142,38 +148,51 @@ async function run(){
   const drop = [];
   const out = {}; const failed = [];
   let calls = 0; let daysRef = null;
+  const nb = Math.ceil(zones.length / BATCH);
   for (let i = 0; i < zones.length; i += BATCH){
+    const bi = Math.floor(i / BATCH) + 1;
     const batch = zones.slice(i, i + BATCH);
-    let resps = null;
-    for (let attempt = 1; attempt <= 2 && !resps; attempt++){
+    let resps = null, lastErr = null, tries = 0, r429 = 0;
+    while (!resps){
       try { calls++; resps = await fetchBatch(cfg, batch, drop); }
       catch (e){
-        if (/429/.test(String(e))) { console.log("429 — backing off 60s"); await sleep(60000); }
-        else if (attempt === 2) resps = "FALLBACK";
-        else await sleep(1500);
+        lastErr = e;
+        if (/429/.test(String(e))){
+          if (++r429 > 4) throw new Error("sustained 429 rate limiting — aborting run to protect quota; ratings NOT written (yesterday's latest.json remains live). Rerun later.");
+          console.log("\n429 on batch " + bi + "/" + nb + " — backing off " + Math.round(BACKOFF / 1000) + "s (retry " + r429 + "/4)");
+          await sleep(BACKOFF);
+        } else if (++tries >= 2){ resps = "FALLBACK"; }
+        else await sleep(3000);
       }
+    }
+    if (resps !== "FALLBACK" && resps.length !== batch.length){
+      console.log("\nWARN batch " + bi + "/" + nb + " size mismatch (" + resps.length + "/" + batch.length + ") — singles fallback");
+      resps = "FALLBACK"; lastErr = lastErr || new Error("size mismatch");
     }
     if (resps === "FALLBACK"){
       /* one bad point shouldn't kill the batch — try each zone alone */
+      console.log("\nbatch " + bi + "/" + nb + " failed (" + errStr(lastErr) + ") — singles fallback");
       for (const z of batch){
         try { calls++; const r = await fetchBatch(cfg, [z], drop);
           const { days, rec } = rateZone(z, r[0], z.normals);
           daysRef = daysRef || days; out[z.id] = rec;
-        } catch (e){ failed.push(z.id); }
+        } catch (e){
+          if (/429/.test(String(e))) throw new Error("429 during singles fallback — aborting run to protect quota; ratings NOT written. Rerun later.");
+          failed.push(z.id);
+          if (failed.length <= 10) console.log("  zone " + z.id + " failed: " + errStr(e));
+        }
         await sleep(250);
       }
     } else {
-      if (resps.length !== batch.length){ console.log("WARN batch size mismatch (" + resps.length + "/" + batch.length + ") — falling back to singles"); i -= BATCH; BATCH_SHRINK(); continue; }
       batch.forEach((z, j) => {
         try { const { days, rec } = rateZone(z, resps[j], z.normals);
           daysRef = daysRef || days; out[z.id] = rec;
-        } catch (e){ failed.push(z.id); }
+        } catch (e){ failed.push(z.id); if (failed.length <= 10) console.log("\n  zone " + z.id + " parse failed: " + errStr(e)); }
       });
     }
     process.stdout.write("\r  rated " + Object.keys(out).length + "/" + zones.length + " (" + calls + " calls)   ");
     await sleep(300);
   }
-  function BATCH_SHRINK(){ /* defensive: mismatch → singles path via FALLBACK on retry */ }
   console.log("");
 
   const doc = {

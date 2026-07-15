@@ -6,12 +6,15 @@
      - deterministic tiers hand-verified against engine math
      - zone with no climo file is skipped (counted, not failed)
      - a poisoned batch falls back to singles; only the bad zone fails
-     - self-heal variable drop path still works through the cron config */
+     - self-heal variable drop path still works through the cron config
+     - 429s retry the SAME batch with backoff (no singles spray, no crash)
+     - a size-mismatch response falls back to singles (no infinite loop) */
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const { spawn } = require("child_process");
 const C = require("../../engine/core.js");
+let CHILD_OUT = "";
 
 const WORK = "/tmp/cron_e2e";
 fs.rmSync(WORK, { recursive: true, force: true });
@@ -27,6 +30,8 @@ const Z = [
   { id: "WYZ275", lat: 44.02, lon: -107.95 },   /* real climo (uploaded) */
   { id: "TST001", lat: 40.00, lon: -110.00 },   /* synthetic climo */
   { id: "TST002", lat: 41.00, lon: -111.00 },   /* synthetic climo */
+  { id: "MISMAT", lat: 14.14, lon: -114.14 },   /* mock appends a bogus element on multi-loc calls */
+  { id: "TST003", lat: 43.00, lon: -113.00 },   /* synthetic climo */
   { id: "NOCLIM", lat: 42.00, lon: -112.00 },   /* no climo -> skipped */
   { id: "BADPT",  lat: 13.13, lon: -113.13 }    /* mock 400s any call containing 13.13 */
 ];
@@ -44,6 +49,8 @@ function flatClimo(id, tmax, rhmin, rhmax){
 }
 fs.writeFileSync(path.join(WORK, "climo", "TST001.json"), JSON.stringify(flatClimo("TST001", 80, 25, 70)));
 fs.writeFileSync(path.join(WORK, "climo", "TST002.json"), JSON.stringify(flatClimo("TST002", 80, 25, 70)));
+fs.writeFileSync(path.join(WORK, "climo", "MISMAT.json"), JSON.stringify(flatClimo("MISMAT", 80, 25, 70)));
+fs.writeFileSync(path.join(WORK, "climo", "TST003.json"), JSON.stringify(flatClimo("TST003", 80, 25, 70)));
 /* BADPT gets climo so it survives to the fetch stage */
 fs.writeFileSync(path.join(WORK, "climo", "BADPT.json"), JSON.stringify(flatClimo("BADPT", 80, 25, 70)));
 
@@ -61,6 +68,8 @@ const SCRIPT = {
   WYZ275: { tmax: 75, rhFloor: 40, cape: 50, precip: 0.4, wind: 6, gust: 10, pop: 70 }, /* benign, wet */
   TST001: { tmax: 80, rhFloor: 25, cape: 50, precip: 0, wind: 3, gust: 8,  pop: 10 },   /* exactly normal */
   TST002: { tmax: 80, rhFloor: 25, cape: 600, precip: 0, wind: 3, gust: 8, pop: 10 },   /* normal + dry cape */
+  MISMAT: { tmax: 80, rhFloor: 25, cape: 50, precip: 0, wind: 3, gust: 8, pop: 10 },
+  TST003: { tmax: 80, rhFloor: 25, cape: 50, precip: 0, wind: 3, gust: 8, pop: 10 },
   BADPT:  { tmax: 80, rhFloor: 25, cape: 0, precip: 0, wind: 0, gust: 0, pop: 0 }
 };
 function omRespFor(lat, lon){
@@ -84,15 +93,22 @@ function omRespFor(lat, lon){
 }
 
 /* ---------- mock server ---------- */
+let deny429 = 2;                       /* first two requests get rate-limited */
 const server = http.createServer((req, res) => {
   const u = new URL(req.url, "http://x");
   const lats = (u.searchParams.get("latitude") || "").split(",").map(Number);
   const lons = (u.searchParams.get("longitude") || "").split(",").map(Number);
+  if (deny429-- > 0){
+    res.writeHead(429, { "content-type": "application/json" });
+    return res.end(JSON.stringify({ reason: "Minutely API request limit exceeded" }));
+  }
   if (lats.some(v => Math.abs(v - 13.13) < 1e-6)){
     res.writeHead(400, { "content-type": "application/json" });
     return res.end(JSON.stringify({ reason: "point rejected by mock" }));
   }
   const body = lats.map((la, i) => omRespFor(la, lons[i]));
+  if (lats.length > 1 && lats.some(v => Math.abs(v - 14.14) < 1e-6))
+    body.push({ bogus: true });          /* size-mismatch fault injection */
   res.writeHead(200, { "content-type": "application/json" });
   res.end(JSON.stringify(body.length === 1 ? body[0] : body));
 });
@@ -100,17 +116,17 @@ const server = http.createServer((req, res) => {
 server.listen(0, "127.0.0.1", () => {
   const base = "http://127.0.0.1:" + server.address().port + "/v1/forecast";
   const child = spawn("node", [path.join(__dirname, "..", "rate_national.js"),
-    "--zones", "data/zones_points.csv", "--climo", "climo", "--out", "ratings", "--batch", "3"],
+    "--zones", "data/zones_points.csv", "--climo", "climo", "--out", "ratings", "--batch", "3", "--backoff429", "400"],
     { cwd: WORK, env: Object.assign({}, process.env, { OM_BASE: base, OM_API_KEY: "" }) });
-  let out = "", errOut = "";
-  child.stdout.on("data", d => out += d);
+  CHILD_OUT = ""; let errOut = "";
+  child.stdout.on("data", d => CHILD_OUT += d);
   child.stderr.on("data", d => errOut += d);
   const killer = setTimeout(() => { console.log("child timeout"); child.kill("SIGKILL"); }, 60000);
   child.on("exit", code => {
     clearTimeout(killer);
-    if (process.env.VERBOSE) console.log(out, errOut);
+    if (process.env.VERBOSE) console.log(CHILD_OUT, errOut);
     ck("script-exit-0", code === 0);
-    if (code !== 0){ console.log(out, errOut); }
+    if (code !== 0){ console.log(CHILD_OUT, errOut); }
     runAsserts();
   });
 });
@@ -122,9 +138,14 @@ function runAsserts(){
   ck("schema", latest.schema === "fpb-national-1" && latest.pointset_version === "poi-v1");
   ck("days", JSON.stringify(latest.days) === JSON.stringify(DAYS));
   ck("noclim-skipped", latest.no_climo === 1 && !latest.zones.NOCLIM);
+  ck("429-retried-same-batch", (CHILD_OUT.match(/429 on batch/g) || []).length === 2);
+  ck("mismatch-fallback", /size mismatch \(4\/3\)/.test(CHILD_OUT));
+  ck("reason-logged", /point rejected by mock/.test(CHILD_OUT));
+  ck("mismat-zone-rated", !!latest.zones.MISMAT && latest.zones.MISMAT.s.every(v => v != null));
+  ck("tst003-rated", !!latest.zones.TST003);
   ck("badpt-failed", latest.failed.length === 1 && latest.failed[0] === "BADPT");
   ck("batchmates-survived", !!latest.zones.TST001 && !!latest.zones.TST002 && !!latest.zones.WYZ275);
-  ck("rated-count", Object.keys(latest.zones).length === 4);
+  ck("rated-count", Object.keys(latest.zones).length === 6);
 
   /* hand-verified expectations, mirroring the engine math exactly */
   /* TST001 — everything at normal, calm, dry-but-no-cape:

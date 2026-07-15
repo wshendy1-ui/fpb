@@ -41,7 +41,10 @@ The script prints its API call count (batch of 40 zones = 1 call, ~24 calls for
 your 940). Open-Meteo may meter per *location* rather than per call, so budget
 ~1,000–1,500 units/day for 940 zones until the first live run confirms actual
 spend on your dashboard — roughly 20–30k for the rest of this month, well inside
-your reserved headroom. 429s trigger a 60s backoff automatically.
+your reserved headroom. 429s retry the same batch after a 60s backoff (max 4); **sustained rate
+limiting aborts the run without writing output**, so the map keeps serving
+yesterday's `latest.json` rather than a half-painted country. Batch failures
+log their reason and fall back to per-zone singles.
 
 ## Output schema (`fpb-national-1`)
 
