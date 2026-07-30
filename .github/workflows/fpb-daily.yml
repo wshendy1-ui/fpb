@@ -1,8 +1,10 @@
 name: FPB daily national ratings
 on:
   schedule:
-    - cron: "40 12 * * *"   # primary — 12:40 UTC / 5:40 AM PDT
-    - cron: "40 13 * * *"   # safety net — no-ops if the primary already ran
+    - cron: "40 12 * * *"   # 5:40 AM PDT
+    - cron: "40 13 * * *"   # 6:40
+    - cron: "40 14 * * *"   # 7:40
+    - cron: "40 15 * * *"   # 8:40
   workflow_dispatch: {}
 permissions:
   contents: write
