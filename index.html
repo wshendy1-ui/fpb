@@ -232,7 +232,7 @@ select,.btn{background:var(--panel2); color:var(--text); border:1px solid var(--
 <div id="app">
 
   <header>
-    <div class="brand"><h1>Fire potential briefing</h1><span class="sub">v2.3 · briefing</span></div>
+    <div class="brand"><h1>Fire potential briefing</h1><span class="sub">v2.3.1</span></div>
     <div id="hdrZone">loading…</div>
     <div class="pills">
       <div id="outlooksWrap">
@@ -590,6 +590,8 @@ function drvValueTxt(id, rec, i){
     case "wind":  return v("wind") == null ? "" : v("wind") + " mph";
     case "gust":  return v("gust") == null ? "" : v("gust") + " mph";
     case "pop":   return v("pop") == null ? "" : v("pop") + "% PoP";
+    case "hainesH": return v("hainesH") == null ? "" : "Haines " + v("hainesH");
+    case "hainesM": return v("hainesM") == null ? "" : "Haines " + v("hainesM");
     case "dryltg":return v("cape") == null ? "" : "CAPE " + v("cape");
     default: return "";
   }
@@ -643,7 +645,7 @@ function refinedFromSamples(samples, normals, elevM, mode, hdwT){
   const conf = C.modelSpread(samples, days);
   const hApp = C.hainesApplicableFromElev(elevM, "auto");
   const rows = {}; DEEP_ROWS.forEach(id => rows[id] = []);
-  const wx = { tmax:[],rhmin:[],rhrec:[],wind:[],gust:[],pop:[],cape:[],precip:[],hdw:[],ffwi:[],vpd:[] };
+  const wx = { tmax:[],rhmin:[],rhrec:[],wind:[],gust:[],pop:[],cape:[],precip:[],hdw:[],ffwi:[],vpd:[],hainesH:[],hainesM:[] };
   const t = [], s = [], dl = [];
   for (const k of days){
     const d = wxAgg.d[k] || {};
@@ -669,7 +671,7 @@ function refinedFromSamples(samples, normals, elevM, mode, hdwT){
     const push=(f,v,r)=>wx[f].push(v==null?null:Math.round(v*(r||1))/(r||1));
     push("tmax",d.tmax);push("rhmin",d.rhmin);push("rhrec",d.rhrec);push("wind",d.wind);
     push("gust",d.gust);push("pop",d.pop);push("cape",d.cape);push("precip",d.precip,100);
-    push("hdw",d.hdw);push("ffwi",d.ffwi);push("vpd",d.vpdmax,10);
+    push("hdw",d.hdw);push("ffwi",d.ffwi);push("vpd",d.vpdmax,10);push("hainesH",d.hainesH,10);push("hainesM",d.hainesM,10);
   }
   return { days, rec:{ t, s, dl, rows, wx }, conf, hVariant:hApp.v, basis: normals ? "sigma" : "abs" };
 }

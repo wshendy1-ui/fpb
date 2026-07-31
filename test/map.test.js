@@ -114,6 +114,7 @@ const eq = (n, a, b) => { ck(n, JSON.stringify(a) === JSON.stringify(b));
   const high = c3.refinedFromSamples(samples, N, 1200, "high");
   eq("ref-wx-high-tmax", high.rec.wx.tmax[0], 94);
   eq("ref-haines-gate", [mean.hVariant, mean.rec.rows.hainesM[0], mean.rec.rows.hainesH[0]], ["H", null, 4]);
+  eq("ref-haines-value-surfaced", [mean.rec.wx.hainesH[0], mean.rec.wx.hainesM[0]], [6, 5]);
   eq("ref-hdw-sev", mean.rec.rows.hdw[0], 2);                    /* 160 in [150,250) band */
   eq("ref-wind-E1", [mean.rec.rows.wind[0], mean.rec.rows.gust[0]], [1, 1]);  /* 10 mph, 20 mph under E1 */
   ck("ref-dl-cape", mean.rec.dl[0] === 3);                        /* dry + cape 600 */
@@ -386,6 +387,10 @@ setTimeout(() => {
                            $("bRows").textContent.indexOf("layer-HDW 7/7") >= 0);
     ck("brief-hainesH-value", w.eval("S.refined.ORZ693.rec.wx.hdw[0] != null") &&
                               w.eval("S.refined.ORZ693.diag.avail.hainesH") === 1);
+    ck("hainesH-wx-surfaced", w.eval("S.refined.ORZ693.rec.wx.hainesH[0]") === 4);   /* gfs-only PL mock -> Haines 4 */
+    ck("hainesH-row-shows-value", w.eval(
+      "Array.from(document.querySelectorAll('#bRows .brow')).some(r => r.textContent.indexOf('Haines — High') >= 0 && r.querySelector('.bv').textContent.trim() === '4')"));
+    ck("hainesH-sev-chip", w.eval("S.refined.ORZ693.rec.rows.hainesH[0]") === 1);    /* 4 vs [4,5,5.5,6] */
     ck("brief-weights", $("bRows").textContent.indexOf("w 1.3") >= 0);
     ck("brief-fuels-stub", $("bRows").textContent.indexOf("DP-2") >= 0 &&
                            $("bRows").textContent.indexOf("Energy Release Component") >= 0);
