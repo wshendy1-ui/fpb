@@ -207,12 +207,13 @@ w.eval(fs.readFileSync(path.join(__dirname, "..", "..", "engine", "core.js"), "u
 w.eval(fs.readFileSync(path.join(__dirname, "..", "..", "engine", "sources.js"), "utf8"));
 function omModelFixture(url){
   const model = (/models=([a-z0-9_]+)/.exec(url) || [])[1] || "gfs_seamless";
+  let fx;
   const mi = ["gfs_seamless","ecmwf_ifs025","icon_seamless","gem_seamless","jma_seamless","ukmo_seamless","meteofrance_seamless"].indexOf(model);
   const days = []; { const t0 = new Date(DAYS[0] + "T12:00:00Z");
     for (let i = 0; i < 7; i++) days.push(new Date(t0.getTime() + i * 864e5).toISOString().slice(0, 10)); }
   const time = []; for (const d of days) for (let h = 0; h < 24; h++) time.push(d + "T" + String(h).padStart(2, "0") + ":00");
   const arr = f => time.map((t, i) => f(+t.slice(11, 13)));
-  return {
+  fx = {
     elevation: 1200, utc_offset_seconds: -25200,
     daily: { time: days, temperature_2m_max: days.map(() => 90 + mi), precipitation_sum: days.map(() => 0),
       precipitation_probability_max: days.map(() => 5), wind_speed_10m_max: days.map(() => 10 + mi),
@@ -224,6 +225,12 @@ function omModelFixture(url){
       wind_speed_10m: arr(() => 8 + mi),
       vapour_pressure_deficit: arr(h => 0.5 + 3 * Math.exp(-Math.pow(h - 16, 2) / 45)) }
   };
+  if (mi === 0){   /* only GFS carries pressure-level data in this mock -> availability 1/7 */
+    fx.hourly.temperature_950hPa = arr(() => 75); fx.hourly.temperature_850hPa = arr(() => 66);
+    fx.hourly.temperature_700hPa = arr(() => 48); fx.hourly.temperature_500hPa = arr(() => 18);
+    fx.hourly.dew_point_700hPa = arr(() => 10);   fx.hourly.dew_point_850hPa = arr(() => 30);
+  }
+  return fx;
 }
 function climoRing(v){ const o = {}; for (let m = 1; m <= 12; m++) for (let d = 1; d <= 31; d++)
   o[String(m).padStart(2,"0")+"-"+String(d).padStart(2,"0")] = v; return o; }
@@ -372,6 +379,13 @@ setTimeout(() => {
     ck("brief-sigma-sub", $("bRows").textContent.indexOf("σ vs normal") >= 0);
     ck("brief-hdw-pctl", $("bRows").textContent.indexOf("(USFS anchors)") >= 0);
     ck("brief-haines-na", $("bRows").textContent.indexOf("elevation variant") >= 0);
+    ck("brief-rhrec-clarifier", $("bRows").textContent.indexOf("prev-day 20:00→08:00") >= 0);
+    ck("brief-diag-section", $("bRows").textContent.indexOf("Deep-pull diagnostics") >= 0);
+    ck("brief-diag-models", $("bRows").textContent.indexOf("gfs ✓") >= 0 && $("bRows").textContent.indexOf("ecmwf ✓") >= 0);
+    ck("brief-diag-avail", $("bRows").textContent.indexOf("700/500mb 1/7") >= 0 &&
+                           $("bRows").textContent.indexOf("layer-HDW 7/7") >= 0);
+    ck("brief-hainesH-value", w.eval("S.refined.ORZ693.rec.wx.hdw[0] != null") &&
+                              w.eval("S.refined.ORZ693.diag.avail.hainesH") === 1);
     ck("brief-weights", $("bRows").textContent.indexOf("w 1.3") >= 0);
     ck("brief-fuels-stub", $("bRows").textContent.indexOf("DP-2") >= 0 &&
                            $("bRows").textContent.indexOf("Energy Release Component") >= 0);

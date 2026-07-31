@@ -125,6 +125,10 @@ All field-tunable constants, verbatim except one calibrated change: `THR_DEF` (6
 - **`horizonDrivers/Moderators`** read `c.id`/`c.nm`/`c.cv` off contrib entries;
   when building entries for `scoreContribs`, include `nm` and `cv` if you want
   driver/moderator strings.
+- **`parseOmOne` zero-RH guard (v1.2, deliberate deviation from v83)**: hourly
+  `relative_humidity_2m == 0` is treated as a trailing-horizon padding sentinel
+  and excluded from RHmin/RH-recovery — some models pad day 7 with zeros, which
+  otherwise win `min()` and report an impossible 0% RH.
 - **`devSev` severity is unchanged** — normal-centered (at-normal = T2), σ ladder
   −1.0/−0.5/+0.75/+1.5, MIN_SD floors, fallback σ → raw departure → absolute.
 

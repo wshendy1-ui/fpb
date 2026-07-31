@@ -169,6 +169,23 @@ function omFixture(){
   eq("parseOmOne-parity", e, o);
   ck("parseOmOne-fields", e.d["2026-07-14"].hdw!=null && e.d["2026-07-14"].hainesH!=null && e.d["2026-07-15"].rhrec!=null);
 }
+{
+  /* v1.2 deliberate deviation: zero-RH sentinel guard.
+     A model padding its trailing horizon with rh=0 must not produce 0% rhmin
+     (or poison rhrec). This is intentionally NOT parity with v83. */
+  const fx=omFixture();
+  const t2=fx.hourly.time, rh=fx.hourly.relative_humidity_2m;
+  for(let i=0;i<t2.length;i++) if(t2[i].slice(0,10)==="2026-07-15") rh[i]=0;   /* day-2 fully padded */
+  const e2=S.parseOmOne(fx);
+  ck("rh0-day-null", e2.d["2026-07-15"].rhmin===null);
+  ck("rh0-rhrec-null", e2.d["2026-07-15"].rhrec===null || e2.d["2026-07-15"].rhrec>0);
+  const fx3=omFixture();
+  const t3=fx3.hourly.time, rh3=fx3.hourly.relative_humidity_2m;
+  let planted=0;
+  for(let i=0;i<t3.length;i++) if(t3[i].slice(0,10)==="2026-07-15"){ rh3[i]=(planted++<3)?0:14; }
+  const e3=S.parseOmOne(fx3);
+  ck("rh0-mixed-ignores-zeros", e3.d["2026-07-15"].rhmin===14);
+}
 
 /* ================= Layer B — re-plumbed boundaries ================= */
 const MD="2026-07-04";
@@ -187,6 +204,15 @@ for (const [d,want] of [[-8,0],[-4,1],[5.99,2],[6,3],[12,4]])
 eq("devSev-dep-rhmin", C.devSev("rhmin",20-8,MD,Nmeans), 3);
 eq("devSev-abs", C.devSev("tmax",95,MD,null), 4);
 eq("devBasis", [C.devBasis("tmax",MD,Nfull),C.devBasis("tmax",MD,Nmeans),C.devBasis("tmax",MD,null)], ["sigma","dep","abs"]);
+
+/* E1 wind/gust ladder pins (2026-07-15 recalibration) — exact edges.
+   If THR_DEF.wind/gust are retuned, these must be retuned WITH them. */
+eq("E1-wind-ladder", C.THR_DEF.wind.t, [8,13,18,25]);
+eq("E1-gust-ladder", C.THR_DEF.gust.t, [15,22,30,40]);
+for (const [v,want] of [[7.9,0],[8,1],[12.9,1],[13,2],[17.9,2],[18,3],[24.9,3],[25,4]])
+  eq("E1-wind v="+v, C.sevFromThr(v,C.THR_DEF.wind.t,1), want);
+for (const [v,want] of [[14.9,0],[15,1],[21.9,1],[22,2],[29.9,2],[30,3],[39.9,3],[40,4]])
+  eq("E1-gust v="+v, C.sevFromThr(v,C.THR_DEF.gust.t,1), want);
 
 for (const [d,want] of [
   [{pot:5,precip:0,rhmin:30},[2,"DRY LTG"]],[{pot:9.9,precip:0,rhmin:30},[2,"DRY LTG"]],

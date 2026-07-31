@@ -232,7 +232,7 @@ select,.btn{background:var(--panel2); color:var(--text); border:1px solid var(--
 <div id="app">
 
   <header>
-    <div class="brand"><h1>Fire potential briefing</h1><span class="sub">v2.2 · briefing</span></div>
+    <div class="brand"><h1>Fire potential briefing</h1><span class="sub">v2.3 · briefing</span></div>
     <div id="hdrZone">loading…</div>
     <div class="pills">
       <div id="outlooksWrap">
@@ -958,24 +958,31 @@ async function runRefine(){
     if (!c){ toast("no coordinates for " + id); return; }
     const pt = { lat: c[1], lon: c[0] };
     const cfg = { key: (localStorage.getItem(STORE_OMKEY) || "").trim() || undefined };
-    const drop = [];
     status("fetching 0/" + REFINE_MODELS.length + " models…");
     let done = 0;
+    const drops = {};                       /* per-model self-heal isolation (parallel calls must not share) */
     const results = await Promise.allSettled(REFINE_MODELS.map(m =>
-      FS.omFetch(fetch.bind(window), cfg, [pt], m, drop)
+      FS.omFetch(fetch.bind(window), cfg, [pt], m, (drops[m] = []))
         .then(j => { status("fetching " + (++done) + "/" + REFINE_MODELS.length + " models…"); return { m, j }; })
     ));
-    const samples = []; let elevM = null;
-    for (const r of results){
-      if (r.status !== "fulfilled") continue;
+    const samples = []; let elevM = null; const perModel = [];
+    results.forEach((r, ri) => {
+      const m = REFINE_MODELS[ri];
+      if (r.status !== "fulfilled"){ perModel.push({ m, ok:false, err:String(r.reason && r.reason.message || r.reason).slice(0,90) }); return; }
       try {
         const one = FS.parseOmOne(r.value.j);
-        samples.push({ who: id + " \u00b7 " + r.value.m, d: one });
+        samples.push({ who: id + " \u00b7 " + m, d: one });
         if (elevM == null && r.value.j.elevation != null) elevM = r.value.j.elevation;
-      } catch(e){}
-    }
+        perModel.push({ m, ok:true, dropped: drops[m].filter(x => typeof x === "string") });
+      } catch(e){ perModel.push({ m, ok:false, err:"parse: "+String(e.message||e).slice(0,70) }); }
+    });
     if (!samples.length){ toast("all models failed — free tier busy? try again or add a key"); status(""); return; }
-    S.samples[id] = { samples, elevM };
+    /* day-0 field availability across models — the Haines/HDW diagnostic */
+    const avail = {};
+    for (const f of ["hainesH","hainesM","hdw","cape","vpdmax"]){
+      avail[f] = samples.filter(s => { const d0 = s.d.d[s.d.days[0]]; return d0 && d0[f] != null; }).length;
+    }
+    S.samples[id] = { samples, elevM, perModel, avail };
     computeRefined(id);
     status(samples.length + "/" + REFINE_MODELS.length + " models · refined " + new Date().toLocaleTimeString());
     if (S.climo[id] == null) toast("no climatology for " + id + " — absolute-threshold basis");
@@ -987,6 +994,7 @@ function computeRefined(id){
   const out = refinedFromSamples(sc.samples, S.climo[id] || null, sc.elevM, S.aggMode, fit ? hdwThrFromFit(fit) : null);
   if (!out) return;
   out.nModels = sc.samples.length; out.mode = S.aggMode; out.when = Date.now();
+  out.diag = { perModel: sc.perModel, avail: sc.avail };
   S.refined[id] = out;
   renderMatrix(); renderPanel(); renderBriefing();
 }
@@ -1037,11 +1045,18 @@ function renderBriefing(){
         v = rec.wx && rec.wx[id] ? rec.wx[id][i] : null;
         sev = rec.rows && rec.rows[id] ? rec.rows[id][i] : null;
         if (id === "hdw" && v != null && hdwFit){ const p = hdwPctl(hdwFit, v); if (p != null) sub = "p" + p + " (USFS anchors)"; }
-        if ((id === "hainesH" || id === "hainesM") && ref && sev == null) sub = "n/a — elevation variant " + (ref.hVariant || "");
+        if ((id === "hainesH" || id === "hainesM") && ref){
+          const applicable = (ref.hVariant == null) || (id === "hainesH" ? ref.hVariant === "H" : ref.hVariant === "M");
+          if (!applicable) sub = "n/a — elevation variant " + (ref.hVariant || "");
+          else if (v == null && ref.diag) sub = "no " + (id === "hainesH" ? "700/500" : "850/700") +
+            " mb data from models (" + (ref.diag.avail[id] || 0) + "/" + ref.nModels + ")";
+        }
+        if (id === "hdw" && v == null && ref && ref.diag) sub = "no pressure-level data (" + (ref.diag.avail.hdw || 0) + "/" + ref.nModels + ")";
         if (C && climo && (id === "tmax" || id === "rhmin" || id === "rhrec") && v != null){
           const z = C.wxSigma(climo, id, k, v);
           if (z != null) sub = (z >= 0 ? "+" : "") + (Math.round(z * 10) / 10) + "σ vs normal";
         }
+        if (id === "rhrec") sub = (sub ? sub + " · " : "") + "into this morning (prev-day 20:00→08:00)";
         if (v == null && !ref && (id === "hdw" || id === "ffwi" || id === "vpd" || id === "hainesH" || id === "hainesM")) sub = "refine for deep-pull metrics";
       }
       html += "<div class='brow'><span>"+lab+"</span>"+
@@ -1049,6 +1064,22 @@ function renderBriefing(){
         "<span>"+sevChipHtml(sev)+"</span>"+
         "<span class='bsub'>"+sub+(w?" <span class='bw'>w "+w+"</span>":"")+"</span></div>";
     }
+    html += "</div>";
+  }
+  if (ref && ref.diag){
+    html += "<div class='bsect'><div class='bh'>Deep-pull diagnostics</div>";
+    html += "<div class='brow'><span>Models</span><span class='bv'></span><span></span><span class='bsub'>" +
+      ref.diag.perModel.map(p => p.m.replace("_seamless","").replace("_ifs025","") + (p.ok ? " ✓" : " ✗")).join(" · ") + "</span></div>";
+    const fails = ref.diag.perModel.filter(p => !p.ok);
+    if (fails.length) html += "<div class='brow'><span>Failures</span><span class='bv'></span><span></span><span class='bsub'>" +
+      fails.map(p => p.m + ": " + p.err).join(" · ") + "</span></div>";
+    const dropped = []; ref.diag.perModel.forEach(p => (p.dropped || []).forEach(d => { if (dropped.indexOf(d) < 0) dropped.push(d); }));
+    if (dropped.length) html += "<div class='brow'><span>Self-heal dropped vars</span><span class='bv'></span><span></span><span class='bsub'>" + dropped.join(", ") + "</span></div>";
+    html += "<div class='brow'><span>Day-0 field availability</span><span class='bv'></span><span></span><span class='bsub'>" +
+      "700/500mb " + ref.diag.avail.hainesH + "/" + ref.nModels +
+      " · 850/700mb " + ref.diag.avail.hainesM + "/" + ref.nModels +
+      " · layer-HDW " + ref.diag.avail.hdw + "/" + ref.nModels +
+      " · CAPE " + ref.diag.avail.cape + "/" + ref.nModels + "</span></div>";
     html += "</div>";
   }
   $("bRows").innerHTML = html;

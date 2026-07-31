@@ -90,7 +90,7 @@ function parseOmOne(om){
     for(const i of ids){
       const rh=A_rh[i],t=A_t[i],w=A_w[i],
             v=A_v[i],c=hr.cape?hr.cape[i]:null;
-      if(rh!=null){rhmin=rhmin==null?rh:Math.min(rhmin,rh);}
+      if(rh!=null&&rh>0){rhmin=rhmin==null?rh:Math.min(rhmin,rh);}   /* v1.2: rh==0 is a padding sentinel on some models' trailing horizon — exclude */
       if(v!=null){vpdmax=vpdmax==null?v:Math.max(vpdmax,v);vpdsum+=v;vpdn++;}
       if(v!=null&&w!=null){const xs=C.hdwHour(v,w);hdwS=hdwS==null?xs:Math.max(hdwS,xs);}
       let vLay=v,wLay=w;
@@ -114,8 +114,8 @@ function parseOmOne(om){
     o.rhmin=rhmin;o.vpdmax=vpdmax;o.vpdmean=vpdn?vpdsum/vpdn:null;o.hdw=hdw;o.hdwSfc=hdwS;o.ffwi=ff;o.cape=cape;
     let rec=null;
     const prev=di>0?(idxByDay[days[di-1]]||[]):[];
-    for(const i of prev){const hh=+hr.time[i].slice(11,13);if(hh>=20&&A_rh[i]!=null)rec=rec==null?A_rh[i]:Math.max(rec,A_rh[i]);}
-    for(const i of ids){const hh=+hr.time[i].slice(11,13);if(hh<=8&&A_rh[i]!=null)rec=rec==null?A_rh[i]:Math.max(rec,A_rh[i]);}
+    for(const i of prev){const hh=+hr.time[i].slice(11,13);if(hh>=20&&A_rh[i]!=null&&A_rh[i]>0)rec=rec==null?A_rh[i]:Math.max(rec,A_rh[i]);}
+    for(const i of ids){const hh=+hr.time[i].slice(11,13);if(hh<=8&&A_rh[i]!=null&&A_rh[i]>0)rec=rec==null?A_rh[i]:Math.max(rec,A_rh[i]);}
     o.rhrec=rec;
     let hi=hr.time?hr.time.indexOf(k+"T16:00"):-1;
     if(hi<0&&hr.time)hi=hr.time.indexOf(k+"T15:00");
