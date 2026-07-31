@@ -123,6 +123,27 @@ const eq = (n, a, b) => { ck(n, JSON.stringify(a) === JSON.stringify(b));
   eq("normalSeries", c3.normalSeries(N, "tmax", days7.slice(0,2)), [90,90]);
   eq("deltaTxt", [c3.deltaTxt(2,2), c3.deltaTxt(1,3)], ["matches national", "national MOD → refined V HIGH"]);
   ck("refineWeights", c3.refineWeights().hdw === 1.3 && c3.refineWeights().dryltg === 1.1);
+
+  /* v2.1 — HDW anchor fit (v83 lognormal math) + nice ticks */
+  ck("phiCdf-half", Math.abs(c3.phiCdf(0) - 0.5) < 1e-6);
+  ck("phiCdf-p95", Math.abs(c3.phiCdf(1.64485) - 0.95) < 1e-3);
+  const fit = c3.fitHdwAnchors(150, 300);
+  ck("hdw-fit-ok", !fit.err && fit.sigma > 0);
+  ck("hdw-q-p95-roundtrip", Math.abs(c3.hdwQ(fit, "p95") - 300) <= 1);
+  ck("hdw-q-p75-roundtrip", Math.abs(c3.hdwQ(fit, "p75") - 150) <= 1);
+  ck("hdw-q-monotone", c3.hdwQ(fit,"p50") < c3.hdwQ(fit,"p75") && c3.hdwQ(fit,"p90") < c3.hdwQ(fit,"p95"));
+  ck("hdw-pctl", Math.abs(c3.hdwPctl(fit, 300) - 95) <= 1 && Math.abs(c3.hdwPctl(fit, 150) - 75) <= 1);
+  ck("hdw-fit-rejects", !!c3.fitHdwAnchors(300, 150).err && !!c3.fitHdwAnchors(0, 100).err);
+  eq("hdw-thr-seed", c3.hdwThrFromFit(fit).length, 4);
+  eq("niceTicks-65-80", c3.niceTicks(63, 81), [65, 70, 75, 80]);
+  eq("niceTicks-rh", c3.niceTicks(8, 46), [10, 20, 30, 40]);
+  ck("hdw-stale", c3.hdwStaleDays({ at: new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10) }, Date.now()) > 21);
+  /* anchored thresholds must discriminate from the default ladder:
+     hdw 240 -> sev 2 vs THR [75,150,250,350], sev 3 vs anchors (q90≈231) */
+  const s240 = JSON.parse(JSON.stringify(samples));
+  for (const smp of s240) for (const k of days7) smp.d.d[k].hdw = 240;
+  ck("hdw-default-240", c3.refinedFromSamples(s240, N, 1200, "mean").rec.rows.hdw[0] === 2);
+  ck("hdw-anchored-240", c3.refinedFromSamples(s240, N, 1200, "mean", c3.hdwThrFromFit(fit)).rec.rows.hdw[0] === 3);
 }
 
 /* ================= Layer 2 — jsdom boot smoke ================= */
