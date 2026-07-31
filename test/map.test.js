@@ -329,6 +329,66 @@ setTimeout(() => {
   ck("search-fly", !!mapStub.fly && Math.abs(mapStub.fly.center[0] - (-107.95)) < 0.01);
   ck("search-selects", $("hdrZone").textContent.indexOf("WYZ275") === 0);
 
-  console.log(pass + " passed, " + fail + " failed");
-  process.exit(fail ? 1 : 0);
+  /* ===== DP-1/2 end-to-end: refine ORZ693 through stubbed OM + climo ===== */
+  w.eval("selectZone('ORZ693')");
+  Promise.resolve(w.eval("runRefine()")).then(() => {
+    ck("refine-status-7", $("refineStatus").textContent.indexOf("7/7") >= 0);
+    ck("refine-badge", $("pnlDayHead").innerHTML.indexOf("REFINED") >= 0);
+    ck("refine-matrix-marker", $("matrix").children[0].className.indexOf("ref") >= 0);
+    ck("refine-hdw-row", $("pnlWx").textContent.indexOf("HDW layer-max") >= 0 && $("pnlWx").textContent.indexOf("FFWI") >= 0);
+    ck("refine-conf-chip", $("pnlRating").textContent.indexOf("CONF") >= 0);
+    ck("refine-consensus-line", $("pnlDrivers").textContent.indexOf("7/7 model consensus") >= 0);
+    ck("refine-mean-tmax", w.eval("S.refined.ORZ693.rec.wx.tmax[0]") === 93);   /* models 90..96 */
+    $("modeHigh").checked = true; $("modeMean").checked = false;
+    $("modeHigh").dispatchEvent(new w.Event("change"));
+    ck("refine-high-tmax", w.eval("S.refined.ORZ693.rec.wx.tmax[0]") === 96);
+    ck("refine-mode-persist", w.localStorage.getItem("fpb.aggmode.v1") === "high");
+
+    /* v2.1 — HDW anchors end-to-end */
+    $("hdwP75").value = "150"; $("hdwP95").value = "300";
+    $("hdwApply").dispatchEvent(new w.Event("click"));
+    ck("hdw-status-set", $("hdwStatus").textContent.indexOf("p90") >= 0 && $("hdwStatus").textContent.indexOf("ORZ693") >= 0);
+    ck("hdw-persisted", !!w.localStorage.getItem("fpb.hdw.ORZ693"));
+    ck("hdw-row-pctl", $("pnlWx").textContent.indexOf("(USFS)") >= 0);
+
+    w.eval("openDrawer()");
+    const cards = $("drawerBody").querySelectorAll(".chartCard");
+    ck("charts-cards", cards.length >= 5);
+    ck("charts-normal-note", $("drawerBody").innerHTML.indexOf("30-yr normal") >= 0);
+    ck("score-bands", $("drawerBody").innerHTML.indexOf("EXTR") >= 0);
+    ck("norm-axis-label", $("drawerBody").innerHTML.indexOf("norm 92") >= 0);
+    ck("hdw-pline", $("drawerBody").innerHTML.indexOf(">p95<") >= 0);
+    cards[0].dispatchEvent(new w.Event("click"));
+    ck("chart-modal-opens", $("chartModal").classList.contains("open"));
+    $("chartModalClose").dispatchEvent(new w.Event("click"));
+    ck("chart-modal-closes", !$("chartModal").classList.contains("open"));
+
+    /* v2.2 — zone briefing overlay */
+    $("btnBriefing").dispatchEvent(new w.Event("click"));
+    ck("brief-opens", $("briefing").classList.contains("open"));
+    ck("brief-title", $("bTitle").textContent.indexOf("ORZ693") === 0);
+    ck("brief-refined-badge", $("bBadges").innerHTML.indexOf("REFINED") >= 0);
+    ck("brief-day-chips", $("bDays").children.length === 7);
+    ck("brief-sigma-sub", $("bRows").textContent.indexOf("σ vs normal") >= 0);
+    ck("brief-hdw-pctl", $("bRows").textContent.indexOf("(USFS anchors)") >= 0);
+    ck("brief-haines-na", $("bRows").textContent.indexOf("elevation variant") >= 0);
+    ck("brief-weights", $("bRows").textContent.indexOf("w 1.3") >= 0);
+    ck("brief-fuels-stub", $("bRows").textContent.indexOf("DP-2") >= 0 &&
+                           $("bRows").textContent.indexOf("Energy Release Component") >= 0);
+    ck("brief-charts-grid", $("bCharts").querySelectorAll(".chartCard").length >= 5);
+    ck("brief-hash", w.location.hash.indexOf("zone=ORZ693") >= 0 && w.location.hash.indexOf("view=briefing") >= 0);
+    $("bDays").children[3].dispatchEvent(new w.Event("click"));
+    ck("brief-day-sync", w.eval("S.day") === 3 && w.location.hash.indexOf("day=3") >= 0);
+    $("bCharts").querySelectorAll(".chartCard")[0].dispatchEvent(new w.Event("click"));
+    ck("brief-chart-modal", $("chartModal").classList.contains("open"));
+    $("chartModalClose").dispatchEvent(new w.Event("click"));
+    $("bClose").dispatchEvent(new w.Event("click"));
+    ck("brief-closes", !$("briefing").classList.contains("open") && w.location.hash.indexOf("view=briefing") < 0);
+    w.eval("applyHash('#zone=WYZ275&day=2&view=briefing')");
+    ck("hash-applies", w.eval("S.sel") === "WYZ275" && w.eval("S.day") === 2 && $("briefing").classList.contains("open"));
+    ck("hash-national-badge", $("bBadges").innerHTML.indexOf("NATIONAL") >= 0);
+
+    console.log(pass + " passed, " + fail + " failed");
+    process.exit(fail ? 1 : 0);
+  }).catch(e => { console.error("e2e error:", e); process.exit(1); });
 }, 80);

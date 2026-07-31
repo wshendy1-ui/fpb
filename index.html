@@ -175,6 +175,31 @@ select,.btn{background:var(--panel2); color:var(--text); border:1px solid var(--
 #hdwStatus{font:400 11px Barlow; color:#8a93a0; margin-top:4px;}
 #hdwStatus.stale{color:#e6c832;}
 .axTick{font-size:9px; fill:#8a93a0;}
+#main{position:relative;}
+#briefing{position:absolute; inset:0; z-index:70; display:none; background:#12161c; overflow:hidden; flex-direction:column;}
+#briefing.open{display:flex;}
+#briefing .bhead{display:flex; align-items:center; gap:10px; padding:12px 18px; border-bottom:1px solid #39414c;}
+#briefing .bhead h2{font:600 20px "Barlow Condensed"; letter-spacing:.06em; color:#e8e4da; margin:0;}
+#briefing .bhead .sp{flex:1;}
+#briefing .bbody{overflow-y:auto; padding:14px 18px 30px;}
+#briefing .bdays{display:flex; gap:6px; margin-bottom:14px; flex-wrap:wrap;}
+#briefing .bday{border:1px solid #39414c; border-radius:8px; padding:6px 10px; cursor:pointer; text-align:center; min-width:64px;}
+#briefing .bday.active{border-color:#e8842a;}
+#briefing .bday .d1{font:600 10px "Barlow Condensed"; letter-spacing:.12em; color:#8a93a0;}
+#briefing .bday .d2{font:600 14px "Barlow Condensed";}
+#briefing .bsect{margin-top:16px;}
+#briefing .bsect .bh{font:600 12px "Barlow Condensed"; letter-spacing:.16em; text-transform:uppercase; color:#8a93a0;
+  border-bottom:1px solid #39414c; padding-bottom:4px; margin-bottom:2px;}
+.brow{display:grid; grid-template-columns: 1.5fr 1fr 92px 1.4fr; gap:8px; align-items:center;
+  padding:6px 2px; border-bottom:1px dashed #2a313a; font:400 13px Barlow; color:#e8e4da;}
+.brow .bv{font:500 13px "IBM Plex Mono";}
+.brow .bw{font:400 10px "IBM Plex Mono"; color:#5d6570;}
+.brow .bsub{font:400 11px Barlow; color:#8a93a0;}
+.sevChip{display:inline-block; min-width:58px; text-align:center; padding:2px 8px; border-radius:6px;
+  font:600 11px "Barlow Condensed"; letter-spacing:.1em; color:#14181d;}
+.sevChip.na{background:#2a313a; color:#5d6570;}
+#briefing .bcharts{display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:10px; margin-top:8px;}
+#chartModal{z-index:90;}
 #banner{position:absolute; left:50%; top:14px; transform:translateX(-50%); z-index:40; display:none;
   background:#3a2020; border:1px solid #7a3b3b; color:#f0d9d9; padding:8px 14px; border-radius:8px; font:500 13px Barlow;}
 #pinList .pin{display:flex; justify-content:space-between; align-items:center; padding:4px 6px; border:1px solid var(--line,#39414c);
@@ -207,7 +232,7 @@ select,.btn{background:var(--panel2); color:var(--text); border:1px solid var(--
 <div id="app">
 
   <header>
-    <div class="brand"><h1>Fire potential briefing</h1><span class="sub">v2.1 · deep pull</span></div>
+    <div class="brand"><h1>Fire potential briefing</h1><span class="sub">v2.2 · briefing</span></div>
     <div id="hdrZone">loading…</div>
     <div class="pills">
       <div id="outlooksWrap">
@@ -257,6 +282,21 @@ select,.btn{background:var(--panel2); color:var(--text); border:1px solid var(--
   </div>
 
   <div id="main">
+    <div id="briefing" aria-hidden="true">
+      <div class="bhead">
+        <h2 id="bTitle">—</h2>
+        <span id="bBadges"></span>
+        <span class="sp"></span>
+        <button class="btn small" id="bPermalink">Copy link</button>
+        <button class="btn small" id="bClose">Close ✕</button>
+      </div>
+      <div class="bbody">
+        <div class="bdays" id="bDays"></div>
+        <div id="bRows"></div>
+        <div class="bsect"><div class="bh">Charts</div><div class="bcharts" id="bCharts"></div></div>
+      </div>
+    </div>
+    <div id="chartModal"><div class="box"><div class="bt"><span id="chartModalTitle"></span><button class="btn small" id="chartModalClose">Close ✕</button></div><div id="chartModalBody"></div></div></div>
 
     <nav id="rail">
       <div class="sect">
@@ -307,7 +347,7 @@ select,.btn{background:var(--panel2); color:var(--text); border:1px solid var(--
 
     <div id="mapwrap">
       <div id="map"></div>
-      <div id="chartModal"><div class="box"><div class="bt"><span id="chartModalTitle"></span><button class="btn small" id="chartModalClose">Close ✕</button></div><div id="chartModalBody"></div></div></div>
+      
       <div id="banner"></div>
       <div id="tip"></div>
       <div id="mapHint">Click a fire weather zone to brief it</div>
@@ -335,6 +375,7 @@ select,.btn{background:var(--panel2); color:var(--text); border:1px solid var(--
           <div class="bd" id="pnlWx"></div>
         </div>
         <div style="padding:10px 14px; display:flex; flex-direction:column; gap:8px">
+          <button class="btn" id="btnBriefing">Open full briefing ▸</button>
           <button class="btn" id="btnWkChart">Charts ▸</button>
           <div id="refineStatus"></div>
         </div>
@@ -419,6 +460,17 @@ const STORE_AGGMODE = "fpb.aggmode.v1";
 const REFINE_MODELS = ["gfs_seamless","ecmwf_ifs025","icon_seamless","gem_seamless","jma_seamless","ukmo_seamless","meteofrance_seamless"];
 const DEEP_ROWS = ["tmax","rhmin","rhrec","wind","gust","pop","hdw","ffwi","vpd","hainesH","hainesM"];
 const DEEP_DRV_LAB = { hdw:"Hot-Dry-Windy", ffwi:"Fosberg FFWI", vpd:"VPD", hainesH:"Haines (High)", hainesM:"Haines (Mid)" };
+const BRIEF_SECTIONS = [
+  { title:"Weather — anomaly vs 30-yr normals", rows:[
+    ["tmax","Max temperature","°F"],["rhmin","Min relative humidity","%"],["rhrec","Overnight RH recovery","%"]]},
+  { title:"Weather — absolute", rows:[
+    ["wind","Sustained wind (daily max)","mph"],["gust","Gusts (daily max)","mph"],["pop","Precip probability","%"],
+    ["hdw","Hot-Dry-Windy (layer max)",""],["ffwi","Fosberg FFWI",""],["vpd","Max VPD","kPa"],
+    ["hainesH","Haines — High (700/500)",""],["hainesM","Haines — Mid (850/700)",""]]},
+  { title:"Fire starts", rows:[["dryltg","Dry lightning",""]]},
+  { title:"Fuels — FEMS (arrives with DP-2)", rows:[
+    ["erc","Energy Release Component",""],["bi","Burning Index",""],["fm100","100-hr fuel moisture","%"],["fm1000","1000-hr fuel moisture","%"]], stub:true }
+];
 const CHART_DEFS = [
   { id:"tmax",  lab:"Max temp",        unit:"°F",  norm:"tmax"  },
   { id:"rhmin", lab:"RH min",          unit:"%",   norm:"rhmin" },
@@ -795,14 +847,14 @@ function setDay(i){
     map.setPaintProperty("zones-fill","fill-color", fillExpr(S.day));
     map.setFilter("dl-pts", dlFilter(S.day));
   }
-  renderPanel();
+  renderPanel(); renderBriefing(); writeHash();
 }
 function selectZone(id){
   S.sel = id;
   $("hdrZone").textContent = id ? (id+" — "+(S.names[id]||"")) : "no zone selected — click the map";
   if (map && map.getLayer && map.getLayer("zones-sel"))
     map.setFilter("zones-sel", ["==", ["get","id"], id||""]);
-  renderMatrix(); renderPanel(); renderPins(); renderHdwStatus();
+  renderMatrix(); renderPanel(); renderPins(); renderHdwStatus(); renderBriefing(); writeHash();
 }
 function flyToZone(id){
   const c = S.centroids[id];
@@ -936,7 +988,103 @@ function computeRefined(id){
   if (!out) return;
   out.nModels = sc.samples.length; out.mode = S.aggMode; out.when = Date.now();
   S.refined[id] = out;
-  renderMatrix(); renderPanel();
+  renderMatrix(); renderPanel(); renderBriefing();
+}
+
+/* ---------- zone briefing (option A) ---------- */
+function briefingOpen(){ return $("briefing").classList.contains("open"); }
+function sevChipHtml(s){
+  if (s == null) return "<span class='sevChip na'>n/a</span>";
+  return "<span class='sevChip' style='background:"+tierColor(s)+"'>"+ADJ_S[s]+"</span>";
+}
+function renderBriefing(){
+  if (!briefingOpen() || !S.sel || !S.doc) return;
+  const ref = activeRefined();
+  const rec = ref ? ref.rec : S.doc.zones[S.sel];
+  const days = ref ? ref.days : S.doc.days;
+  const weights = ref ? refineWeights() : S.doc.weights;
+  const climo = S.climo[S.sel] || null;
+  const C = (typeof FPBCore !== "undefined") ? FPBCore : null;
+  $("bTitle").textContent = S.sel + " — " + (S.names[S.sel] || "");
+  $("bBadges").innerHTML = ref ? "<span class='badgeRef'>REFINED</span>" :
+    "<span class='badgeRef' style='border-color:#8a93a0;color:#8a93a0'>NATIONAL</span>";
+  /* day chips */
+  $("bDays").innerHTML = days.map((d,i)=>{
+    const t = rec ? rec.t[i] : null;
+    return "<div class='bday"+(i===S.day?" active":"")+"' data-i='"+i+"'>"+
+      "<div class='d1'>"+dayLabel(d,i).toUpperCase()+"</div>"+
+      "<div class='d2' style='color:"+tierColor(t)+"'>"+(t==null?"—":ADJ_S[t])+"</div></div>";
+  }).join("");
+  Array.from($("bDays").children).forEach(el=>el.addEventListener("click",()=>setDay(+el.dataset.i)));
+  if (!rec){ $("bRows").innerHTML = "<div style='color:#8a93a0;padding:14px 0'>No national rating for this zone (outside fetched climatology).</div>"; $("bCharts").innerHTML=""; return; }
+  const i = S.day, k = days[i];
+  const hdwFit = loadHdwFit(S.sel);
+  let html = "";
+  for (const sect of BRIEF_SECTIONS){
+    html += "<div class='bsect'><div class='bh'>"+sect.title+"</div>";
+    for (const [id, lab, unit] of sect.rows){
+      let v = null, sev = null, sub = "", w = weights ? weights[id] : null;
+      if (id === "dryltg"){
+        sev = rec.dl ? rec.dl[i] : null; w = weights ? weights.dryltg : null;
+        const cape = rec.wx && rec.wx.cape ? rec.wx.cape[i] : null;
+        v = sev != null && sev >= DL_MIN ? "DRY LTG" : (sev > 0 ? "LTG risk" : "—");
+        sub = cape != null ? "CAPE " + cape + (rec.wx.precip && rec.wx.precip[i] != null ? " · precip " + rec.wx.precip[i] + "\"" : "") : "";
+      } else if (sect.stub){
+        html += "<div class='brow' style='opacity:.45'><span>"+lab+"</span><span class='bv'>—</span>"+
+          "<span><span class='sevChip na'>DP-2</span></span><span class='bsub'>FEMS fuels integrate next increment</span></div>";
+        continue;
+      } else {
+        v = rec.wx && rec.wx[id] ? rec.wx[id][i] : null;
+        sev = rec.rows && rec.rows[id] ? rec.rows[id][i] : null;
+        if (id === "hdw" && v != null && hdwFit){ const p = hdwPctl(hdwFit, v); if (p != null) sub = "p" + p + " (USFS anchors)"; }
+        if ((id === "hainesH" || id === "hainesM") && ref && sev == null) sub = "n/a — elevation variant " + (ref.hVariant || "");
+        if (C && climo && (id === "tmax" || id === "rhmin" || id === "rhrec") && v != null){
+          const z = C.wxSigma(climo, id, k, v);
+          if (z != null) sub = (z >= 0 ? "+" : "") + (Math.round(z * 10) / 10) + "σ vs normal";
+        }
+        if (v == null && !ref && (id === "hdw" || id === "ffwi" || id === "vpd" || id === "hainesH" || id === "hainesM")) sub = "refine for deep-pull metrics";
+      }
+      html += "<div class='brow'><span>"+lab+"</span>"+
+        "<span class='bv'>"+(v==null?"—":v+(unit?" "+unit:""))+"</span>"+
+        "<span>"+sevChipHtml(sev)+"</span>"+
+        "<span class='bsub'>"+sub+(w?" <span class='bw'>w "+w+"</span>":"")+"</span></div>";
+    }
+    html += "</div>";
+  }
+  $("bRows").innerHTML = html;
+  /* charts grid */
+  const defs = [{ id:"score", lab:"Composite", unit:"" }].concat(CHART_DEFS);
+  let ch = "";
+  for (const def of defs){
+    const cd = chartDataFor(def); if (!cd) continue;
+    ch += "<div class='chartCard' data-cid='"+def.id+"'><div class='cl'>"+cd.title+"</div>"+chartSVG(cd)+"</div>";
+  }
+  $("bCharts").innerHTML = ch;
+  Array.from($("bCharts").querySelectorAll(".chartCard")).forEach(el=>
+    el.addEventListener("click", ()=>openChartModal(el.dataset.cid)));
+}
+function openBriefing(){
+  if (!S.sel){ toast("select a zone first"); return; }
+  $("briefing").classList.add("open"); $("briefing").setAttribute("aria-hidden","false");
+  renderBriefing(); writeHash();
+}
+function closeBriefing(){
+  $("briefing").classList.remove("open"); $("briefing").setAttribute("aria-hidden","true");
+  writeHash();
+}
+/* ---------- deep links ---------- */
+function writeHash(){
+  if (!S.sel){ history.replaceState(null, "", location.pathname + location.search); return; }
+  let h = "#zone=" + S.sel + "&day=" + S.day;
+  if (briefingOpen()) h += "&view=briefing";
+  history.replaceState(null, "", h);
+}
+function applyHash(h){
+  const m = {}; String(h || "").replace(/^#/, "").split("&").forEach(kv => {
+    const p = kv.split("="); if (p[0]) m[p[0]] = decodeURIComponent(p[1] || ""); });
+  if (m.zone && (S.doc.zones[m.zone] || S.centroids[m.zone])) selectZone(m.zone);
+  if (m.day != null && !isNaN(+m.day)) setDay(+m.day);
+  if (m.view === "briefing" && S.sel) openBriefing();
 }
 
 /* ---------- drawer ---------- */
@@ -1072,7 +1220,8 @@ function boot(){
     map.on("load", ()=>{
       addAppLayers(geo, dlPointsGeojson(j.centroids, doc.zones, NDAYS));
       setDay(0);
-      if (doc.zones[HOME_ZONE]) selectZone(HOME_ZONE);
+      if (location.hash && location.hash.indexOf("zone=") >= 0) applyHash(location.hash);
+      else if (doc.zones[HOME_ZONE]) selectZone(HOME_ZONE);
       renderPills();
     });
     setInterval(()=>{ if (S.doc) { const a=fmtAge(S.doc.generated, Date.now());
@@ -1098,6 +1247,14 @@ function boot(){
   });
   document.addEventListener("click", e=>{
     if (!$("outlooksWrap").contains(e.target)) $("outlooksMenu").classList.remove("open");
+  });
+  $("btnBriefing").addEventListener("click", openBriefing);
+  $("bClose").addEventListener("click", closeBriefing);
+  $("bPermalink").addEventListener("click", ()=>{
+    writeHash();
+    const url = location.href;
+    try { navigator.clipboard.writeText(url).then(()=>toast("link copied"), ()=>toast(url)); }
+    catch(e){ toast(url); }
   });
   $("btnRefine").addEventListener("click", runRefine);
   $("hdwApply").addEventListener("click", ()=>{
