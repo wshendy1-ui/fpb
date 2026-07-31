@@ -9,6 +9,8 @@
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet">
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="engine/core.js"></script>
+<script src="engine/sources.js"></script>
 <style>
 
 :root{
@@ -156,6 +158,19 @@ select,.btn{background:var(--panel2); color:var(--text); border:1px solid var(--
 #tip b{color:#ffffff;}
 #tip .t2{font:400 11px "IBM Plex Mono"; color:#aab3c0; margin-top:2px;}
 .day .tier{font-size:17px;}   /* room for "V HIGH" */
+.badgeRef{display:inline-block; margin-left:8px; padding:2px 8px; border:1px solid #e8842a; color:#e8842a;
+  border-radius:999px; font:600 10px "Barlow Condensed"; letter-spacing:.14em; text-transform:uppercase; vertical-align:middle;}
+.day.ref .tier{text-decoration:underline; text-underline-offset:3px;}
+.confChip{display:inline-block; padding:1px 7px; border-radius:999px; font:600 10px "Barlow Condensed"; letter-spacing:.12em;}
+.conf2{border:1px solid #3f9d4f; color:#3f9d4f;} .conf1{border:1px solid #e6c832; color:#e6c832;} .conf0{border:1px solid #d93025; color:#d93025;}
+.chartCard{border:1px solid #39414c; border-radius:8px; padding:8px; margin-top:8px; cursor:pointer;}
+.chartCard:hover{border-color:#e8842a;}
+.chartCard .cl{font:600 11px "Barlow Condensed"; letter-spacing:.12em; text-transform:uppercase; color:#8a93a0; margin-bottom:4px;}
+#chartModal{position:absolute; inset:0; z-index:60; display:none; background:rgba(10,13,17,.82); align-items:center; justify-content:center;}
+#chartModal.open{display:flex;}
+#chartModal .box{background:#161b22; border:1px solid #4a5563; border-radius:12px; padding:16px 18px; width:min(760px,92%);}
+#chartModal .bt{display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; font:600 14px "Barlow Condensed"; letter-spacing:.1em; text-transform:uppercase; color:#e8e4da;}
+#refineStatus{font:400 11px Barlow; color:#8a93a0; margin-top:6px;}
 #banner{position:absolute; left:50%; top:14px; transform:translateX(-50%); z-index:40; display:none;
   background:#3a2020; border:1px solid #7a3b3b; color:#f0d9d9; padding:8px 14px; border-radius:8px; font:500 13px Barlow;}
 #pinList .pin{display:flex; justify-content:space-between; align-items:center; padding:4px 6px; border:1px solid var(--line,#39414c);
@@ -188,7 +203,7 @@ select,.btn{background:var(--panel2); color:var(--text); border:1px solid var(--
 <div id="app">
 
   <header>
-    <div class="brand"><h1>Fire potential briefing</h1><span class="sub">national · v1.3</span></div>
+    <div class="brand"><h1>Fire potential briefing</h1><span class="sub">v2.0 · deep pull</span></div>
     <div id="hdrZone">loading…</div>
     <div class="pills">
       <div id="outlooksWrap">
@@ -260,6 +275,14 @@ select,.btn{background:var(--panel2); color:var(--text); border:1px solid var(--
       </div>
 
       <div class="sect">
+        <div class="hd">Deep pull</div>
+        <label class="chk"><input type="radio" name="aggMode" id="modeMean" checked> Consensus (mean)</label>
+        <label class="chk"><input type="radio" name="aggMode" id="modeHigh"> High-risk (worst-case)</label>
+        <div style="margin-top:8px; font:400 11px Barlow; color:var(--faint)">Open-Meteo key (optional — stored only in this browser):</div>
+        <input type="password" id="omKey" placeholder="free tier if blank" style="width:100%; margin-top:4px; background:var(--panel,#20262e); border:1px solid #39414c; color:#e8e4da; border-radius:6px; padding:5px 8px; font:400 11px 'IBM Plex Mono'">
+      </div>
+
+      <div class="sect">
         <div class="hd">National composite</div>
         <div style="font:400 12px Barlow; color:var(--faint); line-height:1.5">
           Temp / RHmin / RH-recovery vs 30-yr normals (σ), wind · gust · PoP ladders,
@@ -272,6 +295,7 @@ select,.btn{background:var(--panel2); color:var(--text); border:1px solid var(--
 
     <div id="mapwrap">
       <div id="map"></div>
+      <div id="chartModal"><div class="box"><div class="bt"><span id="chartModalTitle"></span><button class="btn small" id="chartModalClose">Close ✕</button></div><div id="chartModalBody"></div></div></div>
       <div id="banner"></div>
       <div id="tip"></div>
       <div id="mapHint">Click a fire weather zone to brief it</div>
@@ -299,7 +323,8 @@ select,.btn{background:var(--panel2); color:var(--text); border:1px solid var(--
           <div class="bd" id="pnlWx"></div>
         </div>
         <div style="padding:10px 14px; display:flex; flex-direction:column; gap:8px">
-          <button class="btn" id="btnWkChart">7-day score chart ▸</button>
+          <button class="btn" id="btnWkChart">Charts ▸</button>
+          <div id="refineStatus"></div>
         </div>
         <div id="pnlNote">National precompute (single model, weather-anomaly composite).
           Live deep pull adds multi-model consensus, HDW/Haines, and your FEMS fuels — next increment.</div>
@@ -377,6 +402,18 @@ function buildBasemapStyle(active){
   return style;
 }
 
+const STORE_OMKEY   = "fpb.omkey.v1";
+const STORE_AGGMODE = "fpb.aggmode.v1";
+const REFINE_MODELS = ["gfs_seamless","ecmwf_ifs025","icon_seamless","gem_seamless","jma_seamless","ukmo_seamless","meteofrance_seamless"];
+const DEEP_ROWS = ["tmax","rhmin","rhrec","wind","gust","pop","hdw","ffwi","vpd","hainesH","hainesM"];
+const DEEP_DRV_LAB = { hdw:"Hot-Dry-Windy", ffwi:"Fosberg FFWI", vpd:"VPD", hainesH:"Haines (High)", hainesM:"Haines (Mid)" };
+const CHART_DEFS = [
+  { id:"tmax",  lab:"Max temp",        unit:"°F",  norm:"tmax"  },
+  { id:"rhmin", lab:"RH min",          unit:"%",   norm:"rhmin" },
+  { id:"rhrec", lab:"RH recovery",     unit:"%",   norm:"rhmax" },
+  { id:"wind",  lab:"Wind / gusts",    unit:"mph", norm:null, extra:"gust" },
+  { id:"hdw",   lab:"HDW (layer max)", unit:"",    norm:null }
+];
 /* ================= [pure-begin] view-agnostic helpers (node-tested) ================= */
 function tierColor(t){ return (t==null||t<0||t>4)?NODATA_COLOR:TIER_COLORS[t]; }
 function scoreTxt(s){ return s==null?"—":(Math.round(s*100)/100).toFixed(2); }
@@ -493,6 +530,62 @@ function drvValueTxt(id, rec, i){
     default: return "";
   }
 }
+function mdOf(iso){ return String(iso).slice(5); }
+function normalSeries(normals, key, days){
+  if (!normals || !normals[key]) return null;
+  return days.map(d => normals[key][mdOf(d)] != null ? normals[key][mdOf(d)] : null);
+}
+/* full refined assembly from per-model parsed samples — the DP-1 core.
+   samples=[{who, d:parseOmOne-output}], normals may be null (abs fallback). */
+function refinedFromSamples(samples, normals, elevM, mode){
+  const C = (typeof FPBCore !== "undefined") ? FPBCore : null;
+  if (!C || !samples || !samples.length) return null;
+  const days = samples[0].d.days.slice(0, 7);
+  const wxAgg = C.aggregateWx(samples, days, mode === "high" ? "high" : "mean");
+  const conf = C.modelSpread(samples, days);
+  const hApp = C.hainesApplicableFromElev(elevM, "auto");
+  const rows = {}; DEEP_ROWS.forEach(id => rows[id] = []);
+  const wx = { tmax:[],rhmin:[],rhrec:[],wind:[],gust:[],pop:[],cape:[],precip:[],hdw:[],ffwi:[],vpd:[] };
+  const t = [], s = [], dl = [];
+  for (const k of days){
+    const d = wxAgg.d[k] || {};
+    const entries = [
+      { id:"tmax",  s:C.devSev("tmax",  d.tmax,  k, normals), w:C.THR_DEF.tmax.w },
+      { id:"rhmin", s:C.devSev("rhmin", d.rhmin, k, normals), w:C.THR_DEF.rhmin.w },
+      { id:"rhrec", s:C.devSev("rhrec", d.rhrec, k, normals), w:C.THR_DEF.rhrec.w },
+      { id:"wind",  s:C.sevFromThr(d.wind, C.THR_DEF.wind.t, 1), w:C.THR_DEF.wind.w },
+      { id:"gust",  s:C.sevFromThr(d.gust, C.THR_DEF.gust.t, 1), w:C.THR_DEF.gust.w },
+      { id:"pop",   s:C.sevFromThr(d.pop,  C.THR_DEF.pop.t,  0), w:C.THR_DEF.pop.w },
+      { id:"hdw",   s:C.sevFromThr(d.hdw,  C.THR_DEF.hdw.t,  1), w:C.THR_DEF.hdw.w },
+      { id:"ffwi",  s:C.sevFromThr(d.ffwi, C.THR_DEF.ffwi.t, 1), w:C.THR_DEF.ffwi.w },
+      { id:"vpd",   s:C.sevFromThr(d.vpdmax, C.THR_DEF.vpd.t, 1), w:C.THR_DEF.vpd.w },
+      { id:"hainesH", s:C.sevFromThr(d.hainesH, C.THR_DEF.hainesH.t, 1), w:C.hainesWeight(hApp, "H", C.THR_DEF.hainesH.w) },
+      { id:"hainesM", s:C.sevFromThr(d.hainesM, C.THR_DEF.hainesM.t, 1), w:C.hainesWeight(hApp, "M", C.THR_DEF.hainesM.w) },
+      { id:"dryltg", s:C.dryLightning(d).v, w:C.W_DRY }
+    ];
+    const sc = C.scoreContribs(entries);
+    t.push(C.adjLevel(sc.score));
+    s.push(sc.score == null ? null : Math.round(sc.score * 100) / 100);
+    dl.push(C.dryLightning(d).v || 0);
+    for (const e of entries) if (rows[e.id]) rows[e.id].push(e.w ? e.s : null);
+    const push=(f,v,r)=>wx[f].push(v==null?null:Math.round(v*(r||1))/(r||1));
+    push("tmax",d.tmax);push("rhmin",d.rhmin);push("rhrec",d.rhrec);push("wind",d.wind);
+    push("gust",d.gust);push("pop",d.pop);push("cape",d.cape);push("precip",d.precip,100);
+    push("hdw",d.hdw);push("ffwi",d.ffwi);push("vpd",d.vpdmax,10);
+  }
+  return { days, rec:{ t, s, dl, rows, wx }, conf, hVariant:hApp.v, basis: normals ? "sigma" : "abs" };
+}
+function refineWeights(){
+  const C = (typeof FPBCore !== "undefined") ? FPBCore : null; if (!C) return null;
+  const w = { dryltg: C.W_DRY };
+  for (const id of DEEP_ROWS) if (C.THR_DEF[id]) w[id] = C.THR_DEF[id].w;
+  return w;
+}
+function deltaTxt(natT, refT){
+  if (natT == null || refT == null) return "";
+  if (natT === refT) return "matches national";
+  return "national " + ADJ_S[natT] + " → refined " + ADJ_S[refT];
+}
 /* ================= [pure-end] ================= */
 
 function $(id){ return document.getElementById(id); }
@@ -503,7 +596,9 @@ function toast(msg){
 }
 function banner(msg){ const b=$("banner"); b.textContent=msg; b.style.display="block"; }
 
-const S = { day:0, sel:null, doc:null, names:{}, centroids:{}, pins:[] };
+const S = { day:0, sel:null, doc:null, names:{}, centroids:{}, pins:[],
+  refined:{}, samples:{}, climo:{}, elev:{}, aggMode:"mean" };
+function activeRefined(){ return S.sel ? S.refined[S.sel] : null; }
 let map = null;
 
 /* ---------- rendering ---------- */
@@ -520,13 +615,15 @@ function buildTicks(){
 function renderMatrix(){
   const m = $("matrix"); m.innerHTML = "";
   if (!S.doc){ return; }
-  const rec = S.sel ? S.doc.zones[S.sel] : null;
+  const ref = activeRefined();
+  const rec = ref ? ref.rec : (S.sel ? S.doc.zones[S.sel] : null);
+  const days = ref ? ref.days : S.doc.days;
   for (let i = 0; i < NDAYS; i++){
     const card = document.createElement("div");
-    card.className = "day" + (rec ? "" : " ghost") + (rec && i === S.day ? " active" : "");
+    card.className = "day" + (rec ? "" : " ghost") + (rec && i === S.day ? " active" : "") + (ref ? " ref" : "");
     card.setAttribute("role","button");
     card.setAttribute("tabindex", rec ? "0" : "-1");
-    const d = S.doc.days[i];
+    const d = days[i];
     const dow = dayLabel(d, i).split(" ")[0].toUpperCase();
     const date = d.slice(5).replace("-","/");
     if (rec){
@@ -551,20 +648,32 @@ function renderMatrix(){
 function renderPanel(){
   if (!S.sel){ $("pnlEmpty").style.display="block"; $("pnlBody").style.display="none"; return; }
   $("pnlEmpty").style.display="none"; $("pnlBody").style.display="block";
-  const rec = S.doc.zones[S.sel];
-  $("pnlDayHead").textContent = dayLabel(S.doc.days[S.day], S.day) + " · " + S.doc.days[S.day];
+  const ref = activeRefined();
+  const natRec = S.doc.zones[S.sel];
+  const rec = ref ? ref.rec : natRec;
+  const days = ref ? ref.days : S.doc.days;
+  $("pnlDayHead").innerHTML = dayLabel(days[S.day], S.day) + " · " + days[S.day] +
+    (ref ? " <span class='badgeRef'>REFINED</span>" : "");
   $("zoneMeta").innerHTML = "<b>"+S.sel+"</b> — "+(S.names[S.sel]||"")+
     (S.pins.includes(S.sel)?" <span style='color:var(--ember)'>★</span>":"");
   if (!rec){
     $("pnlRating").innerHTML = "<div style='color:var(--faint)'>No national rating — outside the fetched climatology set (tranche 2+).</div>";
     $("pnlDrivers").innerHTML = ""; return;
   }
-  const t = rec.t[S.day], dl = rec.dl[S.day]||0, drv = rec.drv[S.day]||"";
+  const t = rec.t[S.day], dl = rec.dl[S.day]||0, drv = (rec.drv&&rec.drv[S.day])||"";
+  let subLine = "composite " + scoreTxt(rec.s[S.day]);
+  if (ref){
+    const cf = ref.conf[days[S.day]];
+    const band = cf==null?null:(cf.n>=0.5?2:cf.n>=0.25?1:0);
+    subLine += (cf?(" · <span class='confChip conf"+band+"'>CONF "+["LOW","MED","HIGH"][band]+"</span>"):"")
+      + (natRec ? " · " + deltaTxt(natRec.t[S.day], t) : "");
+  }
   $("pnlRating").innerHTML =
     "<span class='tierBig' style='background:"+tierColor(t)+"'>"+(t==null?"—":ADJ[t])+"</span>"+
-    "<div style='margin-top:8px' class='mono'>composite "+scoreTxt(rec.s[S.day])+"</div>";
+    "<div style='margin-top:8px' class='mono'>"+subLine+"</div>";
   let rows = "";
-  const top2 = topDrivers(rec, S.doc.weights, S.day, 2);
+  const weights = ref ? refineWeights() : S.doc.weights;
+  const top2 = topDrivers(rec, weights, S.day, 2);
   if (top2){
     if (top2.length){
       top2.forEach((d, k) => {
@@ -573,7 +682,7 @@ function renderPanel(){
       });
     } else rows += "<div class='drvRow'><span>Drivers</span><span>none elevated</span></div>";
     if (t != null && t <= 1){
-      const inh = inhibitor(rec, S.doc.weights, S.day);
+      const inh = inhibitor(rec, weights, S.day);
       if (inh){
         const val = drvValueTxt(inh.id, rec, S.day);
         rows += "<div class='drvRow'><span>Biggest inhibitor</span><span>"+INH_LAB[inh.id]+(val?" · "+val:"")+"</span></div>";
@@ -583,11 +692,14 @@ function renderPanel(){
     rows += "<div class='drvRow'><span>Top driver</span><span>"+(DRV_LAB[drv]||drv)+"</span></div>";
   }
   rows += "<div class='drvRow'><span>Dry lightning</span><span>"+(dl>=DL_MIN?("⚡ "+DL_LAB[dl]):(dl>0?DL_LAB[dl]:"—"))+"</span></div>";
-  rows += "<div class='drvRow'><span>Model</span><span class='mono'>"+S.doc.model+"</span></div>";
+  rows += "<div class='drvRow'><span>Model</span><span class='mono'>"+
+    (ref ? (ref.nModels+"/"+REFINE_MODELS.length+" model consensus ("+(ref.mode==="high"?"high-risk":"mean")+")") : S.doc.model)+"</span></div>";
+  if (ref && ref.hVariant) rows += "<div class='drvRow'><span>Haines variant</span><span>"+(ref.hVariant==="H"?"High (700/500)":"Mid (850/700)")+"</span></div>";
   $("pnlDrivers").innerHTML = rows;
   if (rec.wx){
     $("pnlWxWrap").style.display = "block";
-    $("pnlWx").innerHTML = WX_LAB.map(([f, lab, unit]) => {
+    const labs = ref ? WX_LAB.concat([["hdw","HDW layer-max",""],["ffwi","FFWI",""],["vpd","VPD max","kPa"]]) : WX_LAB;
+    $("pnlWx").innerHTML = labs.map(([f, lab, unit]) => {
       const v = rec.wx[f] ? rec.wx[f][S.day] : null;
       return "<div class='drvRow'><span>"+lab+"</span><span class='mono'>"+(v==null?"—":v+" "+unit)+"</span></div>";
     }).join("");
@@ -708,24 +820,122 @@ function addAppLayers(zonesGeo, dlGeo){
   map.on("mouseleave","zones-fill", ()=>{ map.getCanvas().style.cursor=""; tip.style.display="none"; });
 }
 
+/* ---------- deep pull ---------- */
+async function runRefine(){
+  if (!S.sel){ toast("select a zone first"); return; }
+  if (typeof FPBCore === "undefined" || typeof FPBSources === "undefined"){
+    banner("engine files missing — ensure engine/core.js + sources.js are deployed"); return;
+  }
+  const id = S.sel, FS = FPBSources;
+  const status = m => { $("refineStatus").textContent = m; };
+  $("btnRefine").disabled = true;
+  try {
+    /* climatology (same origin, cached) */
+    if (!(id in S.climo)){
+      try { const r = await fetch("climo/" + id + ".json");
+        S.climo[id] = r.ok ? ((await r.json()).wxNormals || null) : null;
+      } catch(e){ S.climo[id] = null; }
+    }
+    /* frozen zone point: centroid of the boundary (poi differences are sub-grid) */
+    const c = S.centroids[id];
+    if (!c){ toast("no coordinates for " + id); return; }
+    const pt = { lat: c[1], lon: c[0] };
+    const cfg = { key: (localStorage.getItem(STORE_OMKEY) || "").trim() || undefined };
+    const drop = [];
+    status("fetching 0/" + REFINE_MODELS.length + " models…");
+    let done = 0;
+    const results = await Promise.allSettled(REFINE_MODELS.map(m =>
+      FS.omFetch(fetch.bind(window), cfg, [pt], m, drop)
+        .then(j => { status("fetching " + (++done) + "/" + REFINE_MODELS.length + " models…"); return { m, j }; })
+    ));
+    const samples = []; let elevM = null;
+    for (const r of results){
+      if (r.status !== "fulfilled") continue;
+      try {
+        const one = FS.parseOmOne(r.value.j);
+        samples.push({ who: id + " \u00b7 " + r.value.m, d: one });
+        if (elevM == null && r.value.j.elevation != null) elevM = r.value.j.elevation;
+      } catch(e){}
+    }
+    if (!samples.length){ toast("all models failed — free tier busy? try again or add a key"); status(""); return; }
+    S.samples[id] = { samples, elevM };
+    computeRefined(id);
+    status(samples.length + "/" + REFINE_MODELS.length + " models · refined " + new Date().toLocaleTimeString());
+    if (S.climo[id] == null) toast("no climatology for " + id + " — absolute-threshold basis");
+  } finally { $("btnRefine").disabled = false; }
+}
+function computeRefined(id){
+  const sc = S.samples[id]; if (!sc) return;
+  const out = refinedFromSamples(sc.samples, S.climo[id] || null, sc.elevM, S.aggMode);
+  if (!out) return;
+  out.nModels = sc.samples.length; out.mode = S.aggMode; out.when = Date.now();
+  S.refined[id] = out;
+  renderMatrix(); renderPanel();
+}
+
 /* ---------- drawer ---------- */
-function sparkSVG(vals, days){
-  const W=280,H=120,P=18;
-  const vmax = Math.max(4, ...vals.filter(v=>v!=null));
-  const x=i=>P+i*(W-2*P)/(vals.length-1), y=v=>H-P-(v/vmax)*(H-2*P);
-  let path=""; vals.forEach((v,i)=>{ if(v==null)return; path+=(path?"L":"M")+x(i).toFixed(1)+" "+y(v).toFixed(1)+" "; });
-  const dots = vals.map((v,i)=>v==null?"":"<circle cx='"+x(i).toFixed(1)+"' cy='"+y(v).toFixed(1)+
-    "' r='3.4' fill='"+tierColor(S.doc.zones[S.sel].t[i])+"'/>").join("");
-  const labs = days.map((d,i)=>"<text x='"+x(i).toFixed(1)+"' y='"+(H-2)+"' text-anchor='middle' font-size='9' fill='#8a93a0'>"+dayLabel(d,i).replace("Today","Tdy")+"</text>").join("");
-  return "<svg viewBox='0 0 "+W+" "+H+"' width='100%'><path d='"+path+"' fill='none' stroke='#e8e4da' stroke-width='1.4'/>"+dots+labs+"</svg>";
+function chartSVG(series, normVals, days, tiers, W, H){
+  W=W||280; H=H||120; const P=20;
+  const all=[]; series.forEach(s=>s.vals.forEach(v=>{if(v!=null)all.push(v);}));
+  (normVals||[]).forEach(v=>{if(v!=null)all.push(v);});
+  if(!all.length) return "<svg viewBox='0 0 "+W+" "+H+"'></svg>";
+  let vmin=Math.min.apply(null,all), vmax=Math.max.apply(null,all);
+  if(vmax===vmin){vmax+=1;vmin-=1;} const pad=(vmax-vmin)*0.12; vmin-=pad; vmax+=pad;
+  const n=days.length;
+  const x=i=>P+i*(W-2*P)/(n-1), y=v=>H-P-((v-vmin)/(vmax-vmin))*(H-2*P);
+  const path=vals=>{let p="";vals.forEach((v,i)=>{if(v==null)return;p+=(p?"L":"M")+x(i).toFixed(1)+" "+y(v).toFixed(1)+" ";});return p;};
+  let out="";
+  if(normVals) out+="<path d='"+path(normVals)+"' fill='none' stroke='#8a93a0' stroke-width='1.2' stroke-dasharray='4 3'/>";
+  series.forEach(s=>{
+    out+="<path d='"+path(s.vals)+"' fill='none' stroke='"+(s.color||"#e8e4da")+"' stroke-width='1.5'/>";
+    s.vals.forEach((v,i)=>{ if(v==null)return;
+      out+="<circle cx='"+x(i).toFixed(1)+"' cy='"+y(v).toFixed(1)+"' r='3' fill='"+
+        (s.tierDots&&tiers?tierColor(tiers[i]):(s.color||"#e8e4da"))+"'/>"; });
+  });
+  out+=days.map((d,i)=>"<text x='"+x(i).toFixed(1)+"' y='"+(H-4)+"' text-anchor='middle' font-size='9' fill='#8a93a0'>"+dayLabel(d,i).replace("Today","Tdy")+"</text>").join("");
+  out+="<text x='4' y='12' font-size='9' fill='#8a93a0'>"+(Math.round(vmax*10)/10)+"</text>";
+  out+="<text x='4' y='"+(H-P+4)+"' font-size='9' fill='#8a93a0'>"+(Math.round(vmin*10)/10)+"</text>";
+  return "<svg viewBox='0 0 "+W+" "+H+"' width='100%'>"+out+"</svg>";
+}
+function chartDataFor(def){
+  const ref = activeRefined();
+  const rec = ref ? ref.rec : S.doc.zones[S.sel];
+  const days = ref ? ref.days : S.doc.days;
+  if (!rec) return null;
+  if (def.id === "score"){
+    return { series:[{ vals:rec.s, color:"#e8e4da", tierDots:true }], norm:null, days, tiers:rec.t,
+      title:"Composite score" };
+  }
+  if (!rec.wx || !rec.wx[def.id]) return null;
+  const series=[{ vals:rec.wx[def.id], color:"#e8e4da" }];
+  if (def.extra && rec.wx[def.extra]) series.push({ vals:rec.wx[def.extra], color:"#e8842a" });
+  const norm = def.norm ? normalSeries(S.climo[S.sel], def.norm, days) : null;
+  return { series, norm, days, tiers:rec.t, title:def.lab+(def.unit?" ("+def.unit+")":"") };
 }
 function openDrawer(){
-  if (!S.sel || !S.doc.zones[S.sel]) return;
-  const rec = S.doc.zones[S.sel];
-  $("drawerTitle").textContent = S.sel+" · 7-day composite";
-  $("drawerBody").innerHTML = sparkSVG(rec.s, S.doc.days)+
-    "<div style='font:400 12px Barlow; color:var(--faint); margin-top:6px'>Dot color = day tier. Live deep-pull charts (multi-model wx, fuels) arrive next increment.</div>";
+  if (!S.sel) return;
+  const defs = [{ id:"score", lab:"Composite", unit:"" }].concat(CHART_DEFS);
+  let html = "";
+  for (const def of defs){
+    const cd = chartDataFor(def); if (!cd) continue;
+    html += "<div class='chartCard' data-cid='"+def.id+"'><div class='cl'>"+cd.title+
+      (cd.norm?" <span style='color:#8a93a0'>· dashed = 30-yr normal</span>":"")+"</div>"+
+      chartSVG(cd.series, cd.norm, cd.days, cd.tiers)+"</div>";
+  }
+  $("drawerTitle").textContent = S.sel + " · charts";
+  $("drawerBody").innerHTML = html + "<div style='font:400 11px Barlow; color:var(--faint); margin-top:8px'>Tap a chart to expand. ERC/BI fuels charts arrive with DP-2.</div>";
+  Array.from($("drawerBody").querySelectorAll(".chartCard")).forEach(el=>{
+    el.addEventListener("click", ()=>openChartModal(el.dataset.cid));
+  });
   $("drawer").setAttribute("aria-hidden","false"); $("drawer").classList.add("open");
+}
+function openChartModal(cid){
+  const defs = [{ id:"score", lab:"Composite", unit:"" }].concat(CHART_DEFS);
+  const def = defs.find(d=>d.id===cid); if (!def) return;
+  const cd = chartDataFor(def); if (!cd) return;
+  $("chartModalTitle").textContent = S.sel + " · " + cd.title;
+  $("chartModalBody").innerHTML = chartSVG(cd.series, cd.norm, cd.days, cd.tiers, 720, 320);
+  $("chartModal").classList.add("open");
 }
 function closeDrawer(){ $("drawer").setAttribute("aria-hidden","true"); $("drawer").classList.remove("open"); }
 
@@ -789,7 +999,23 @@ function boot(){
   document.addEventListener("click", e=>{
     if (!$("outlooksWrap").contains(e.target)) $("outlooksMenu").classList.remove("open");
   });
-  $("btnRefine").addEventListener("click", ()=>toast("Live deep pull (multi-model wx, FEMS fuels, HDW/Haines) ships next increment"));
+  $("btnRefine").addEventListener("click", runRefine);
+  $("btnRefine").textContent = "Refine zone — live deep pull ▸";
+  $("chartModalClose").addEventListener("click", ()=>$("chartModal").classList.remove("open"));
+  $("chartModal").addEventListener("click", e=>{ if(e.target.id==="chartModal") $("chartModal").classList.remove("open"); });
+  S.aggMode = localStorage.getItem(STORE_AGGMODE)==="high" ? "high" : "mean";
+  $(S.aggMode==="high"?"modeHigh":"modeMean").checked = true;
+  ["modeMean","modeHigh"].forEach(idm=>$(idm).addEventListener("change", ()=>{
+    S.aggMode = $("modeHigh").checked ? "high" : "mean";
+    localStorage.setItem(STORE_AGGMODE, S.aggMode);
+    if (S.sel && S.samples[S.sel]) computeRefined(S.sel);
+  }));
+  $("omKey").value = localStorage.getItem(STORE_OMKEY) || "";
+  $("omKey").addEventListener("change", e=>{
+    const v = e.target.value.trim();
+    if (v) localStorage.setItem(STORE_OMKEY, v); else localStorage.removeItem(STORE_OMKEY);
+    toast(v ? "key saved in this browser only" : "key cleared — free tier");
+  });
   $("btnWkChart").addEventListener("click", openDrawer);
   $("btnDrawerClose").addEventListener("click", closeDrawer);
   $("lyrZones").addEventListener("change", e=>{

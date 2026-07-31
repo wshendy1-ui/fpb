@@ -90,6 +90,41 @@ const eq = (n, a, b) => { ck(n, JSON.stringify(a) === JSON.stringify(b));
   eq("drivers-null-on-v1", c2.topDrivers({ t:[1], dl:[0] }, W, 0, 2), null);
 }
 
+{
+  /* DP-1 refined assembly with the real engine injected */
+  let pure3 = APP_JS.slice(0, APP_JS.indexOf("/* ================= [pure-end]"));
+  pure3 = pure3.replace('"use strict";', "").replace(/\bconst\b/g, "var").replace(/\blet\b/g, "var");
+  const CORE = require("../../engine/core.js");
+  const c3 = vm.createContext({ Date, Math, JSON, Array, String, Infinity, isNaN, parseFloat, FPBCore: CORE });
+  vm.runInContext(pure3, c3);
+
+  const ring = v => { const o = {}; for (let m = 1; m <= 12; m++) for (let d = 1; d <= 31; d++)
+    o[String(m).padStart(2,"0")+"-"+String(d).padStart(2,"0")] = v; return o; };
+  const N = { tmax:ring(90), tmaxSd:ring(5), rhmin:ring(20), rhminSd:ring(5), rhmax:ring(60), rhmaxSd:ring(5) };
+  const days7 = ["2026-07-20","2026-07-21","2026-07-22","2026-07-23","2026-07-24","2026-07-25","2026-07-26"];
+  const mk = (tmax) => { const d = {}; for (const k of days7)
+    d[k] = { tmax, rhmin:20, rhrec:60, wind:10, gust:20, pop:5, cape:600, precip:0,
+             hdw:160, ffwi:40, vpdmax:3.5, hainesH:6, hainesM:5 };
+    return { days:days7, d, tzOff:-25200 }; };
+  const samples = [ { who:"Z \u00b7 gfs", d:mk(90) }, { who:"Z \u00b7 ecmwf", d:mk(94) } ];
+
+  const mean = c3.refinedFromSamples(samples, N, 1200, "mean");
+  ck("ref-days", mean.days.length === 7 && mean.basis === "sigma");
+  eq("ref-wx-mean-tmax", mean.rec.wx.tmax[0], 92);
+  const high = c3.refinedFromSamples(samples, N, 1200, "high");
+  eq("ref-wx-high-tmax", high.rec.wx.tmax[0], 94);
+  eq("ref-haines-gate", [mean.hVariant, mean.rec.rows.hainesM[0], mean.rec.rows.hainesH[0]], ["H", null, 4]);
+  eq("ref-hdw-sev", mean.rec.rows.hdw[0], 2);                    /* 160 in [150,250) band */
+  eq("ref-wind-E1", [mean.rec.rows.wind[0], mean.rec.rows.gust[0]], [1, 1]);  /* 10 mph, 20 mph under E1 */
+  ck("ref-dl-cape", mean.rec.dl[0] === 3);                        /* dry + cape 600 */
+  ck("ref-score-sane", mean.rec.s[0] > 1.5 && mean.rec.s[0] < 3.5 && mean.rec.t[0] != null);
+  const noN = c3.refinedFromSamples(samples, null, 1200, "mean");
+  eq("ref-abs-basis", noN.basis, "abs");
+  eq("normalSeries", c3.normalSeries(N, "tmax", days7.slice(0,2)), [90,90]);
+  eq("deltaTxt", [c3.deltaTxt(2,2), c3.deltaTxt(1,3)], ["matches national", "national MOD → refined V HIGH"]);
+  ck("refineWeights", c3.refineWeights().hdw === 1.3 && c3.refineWeights().dryltg === 1.1);
+}
+
 /* ================= Layer 2 — jsdom boot smoke ================= */
 const DAYS = ["2026-07-15", "2026-07-16", "2026-07-17", "2026-07-18", "2026-07-19", "2026-07-20", "2026-07-21"];
 const FIX_RATINGS = {
@@ -146,10 +181,43 @@ class StubMap {
   flyTo(o){ this.fly = o; }
 }
 w.maplibregl = { Map: StubMap, NavigationControl: class {} };
+/* real engine into the page, exactly as the script tags would */
+w.eval(fs.readFileSync(path.join(__dirname, "..", "..", "engine", "core.js"), "utf8"));
+w.eval(fs.readFileSync(path.join(__dirname, "..", "..", "engine", "sources.js"), "utf8"));
+function omModelFixture(url){
+  const model = (/models=([a-z0-9_]+)/.exec(url) || [])[1] || "gfs_seamless";
+  const mi = ["gfs_seamless","ecmwf_ifs025","icon_seamless","gem_seamless","jma_seamless","ukmo_seamless","meteofrance_seamless"].indexOf(model);
+  const days = []; { const t0 = new Date(DAYS[0] + "T12:00:00Z");
+    for (let i = 0; i < 7; i++) days.push(new Date(t0.getTime() + i * 864e5).toISOString().slice(0, 10)); }
+  const time = []; for (const d of days) for (let h = 0; h < 24; h++) time.push(d + "T" + String(h).padStart(2, "0") + ":00");
+  const arr = f => time.map((t, i) => f(+t.slice(11, 13)));
+  return {
+    elevation: 1200, utc_offset_seconds: -25200,
+    daily: { time: days, temperature_2m_max: days.map(() => 90 + mi), precipitation_sum: days.map(() => 0),
+      precipitation_probability_max: days.map(() => 5), wind_speed_10m_max: days.map(() => 10 + mi),
+      wind_gusts_10m_max: days.map(() => 20 + mi), sunrise: days.map(d => d + "T05:30"), sunset: days.map(d => d + "T20:45") },
+    hourly: { time,
+      relative_humidity_2m: arr(h => 70 - 50 * Math.exp(-Math.pow(h - 16, 2) / 40)),
+      cape: arr(h => (h >= 12 && h <= 20) ? 600 : 50),
+      temperature_2m: arr(h => 60 + 28 * Math.exp(-Math.pow(h - 16, 2) / 40)),
+      wind_speed_10m: arr(() => 8 + mi),
+      vapour_pressure_deficit: arr(h => 0.5 + 3 * Math.exp(-Math.pow(h - 16, 2) / 45)) }
+  };
+}
+function climoRing(v){ const o = {}; for (let m = 1; m <= 12; m++) for (let d = 1; d <= 31; d++)
+  o[String(m).padStart(2,"0")+"-"+String(d).padStart(2,"0")] = v; return o; }
+const CLIMO_RING = { schema:"fpb-climo-1", pointset_version:"poi-v1", zone:{ id:"ORZ693" },
+  wxNormals: { tmax:climoRing(92), tmaxSd:climoRing(6), rhmin:climoRing(18), rhminSd:climoRing(5),
+               rhmax:climoRing(62), rhmaxSd:climoRing(6) } };
 w.fetch = (url) => Promise.resolve({
   ok: true, status: 200,
-  json: async () => url.indexOf("ratings") >= 0 ? JSON.parse(JSON.stringify(FIX_RATINGS))
-                                                : JSON.parse(JSON.stringify(FIX_GEO))
+  json: async () => {
+    url = String(url);
+    if (url.indexOf("open-meteo") >= 0) return omModelFixture(url);
+    if (url.indexOf("climo/") >= 0) return JSON.parse(JSON.stringify(CLIMO_RING));
+    if (url.indexOf("ratings") >= 0) return JSON.parse(JSON.stringify(FIX_RATINGS));
+    return JSON.parse(JSON.stringify(FIX_GEO));
+  }
 });
 
 /* Test-side transform only: sloppy + var so top-level bindings attach to window.
