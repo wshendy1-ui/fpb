@@ -232,7 +232,7 @@ select,.btn{background:var(--panel2); color:var(--text); border:1px solid var(--
 <div id="app">
 
   <header>
-    <div class="brand"><h1>Fire potential briefing</h1><span class="sub">v2.4</span></div>
+    <div class="brand"><h1>Fire potential briefing</h1><span class="sub">v2.4.1</span></div>
     <div id="hdrZone">loading…</div>
     <div class="pills">
       <div id="outlooksWrap">
@@ -420,7 +420,7 @@ const PIN_SEED      = ["ORZ693","ORZ694","ORZ695"];
 const STORE_PINS    = "fpb.map.pins.v1";
 const CONUS_BOUNDS  = [[-125.5, 24.2], [-66.5, 49.8]];
 const HOME_ZOOM     = 6.3;
-const DL_LAB        = ["—","LOW","MOD","HIGH","HIGH"];
+const DL_LAB        = ["—","LOW","WATCH","HIGH","LIKELY"];
 const DRV_LAB       = { tmax:"Temperature anomaly", rhmin:"RH-min anomaly", rhrec:"Poor RH recovery",
                         wind:"Sustained wind", gust:"Gusts", pop:"Dry pattern (low PoP)", dryltg:"Dry lightning" };
 const STORE_BASEMAP = "fpb.map.basemap.v1";
@@ -1054,7 +1054,7 @@ function renderBriefing(){
       if (id === "dryltg"){
         sev = rec.dl ? rec.dl[i] : null; w = weights ? weights.dryltg : null;
         const cape = rec.wx && rec.wx.cape ? rec.wx.cape[i] : null;
-        v = sev != null && sev >= DL_MIN ? "DRY LTG" : (sev > 0 ? "LTG risk" : "—");
+        v = sev != null && sev >= DL_MIN ? "DRY LTG" : (sev === 2 ? "WATCH" : sev > 0 ? "LTG risk" : "—");
         sub = cape != null ? "CAPE " + cape + (rec.wx.precip && rec.wx.precip[i] != null ? " · precip " + rec.wx.precip[i] + "\"" : "") : "";
       } else if (sect.stub){
         html += "<div class='brow' style='opacity:.45'><span>"+lab+"</span><span class='bv'>—</span>"+

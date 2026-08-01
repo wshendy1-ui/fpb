@@ -240,8 +240,16 @@ for (const [d,want] of [
   [{pot:20,precip:0,rhmin:35},[2,"LTG"]],     /* 35 is NOT <35 → not dry */
   [{pot:12,precip:0.5,rhmin:50},[0,"\u2014"]],
   [{pot:4,precip:0,rhmin:20},[0,"\u2014"]],
-  [{cape:400,precip:0,rhmin:20},[3,"DRY LTG"]],[{cape:1000,precip:0,rhmin:20},[4,"DRY LTG"]],
-  [{cape:399,precip:0,rhmin:20},[0,"\u2014"]],[{},[null,null]]
+  /* R1b CAPE fallback (deliberate deviation from v83 — see core.js) */
+  [{cape:999,precip:0,rhmin:20},[0,"\u2014"]],
+  [{cape:1000,precip:0,rhmin:20},[2,"DL WATCH"]],
+  [{cape:1999,precip:0,rhmin:20,pop:29},[2,"DL WATCH"]],
+  [{cape:2000,precip:0,rhmin:20},[3,"DRY LTG"]],
+  [{cape:4930,precip:0,rhmin:20},[3,"DRY LTG"]],       /* sev 4 is PoT-path only */
+  [{cape:1500,precip:0,rhmin:20,pop:30},[0,"\u2014"]], /* PoP gate edge */
+  [{cape:1500,precip:0.10,rhmin:20},[0,"\u2014"]],
+  [{cape:2500,precip:0,rhmin:35},[0,"\u2014"]],
+  [{},[null,null]]
 ]){ const r=C.dryLightning(d); eq("dryltg "+JSON.stringify(d), [r.v,r.txt], want); }
 
 eq("lalSev", [C.lalSev(2),C.lalSev(3),C.lalSev(4),C.lalSev(5),C.lalSev(6),C.lalSev(null)], [0,1,2,3,4,null]);

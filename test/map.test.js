@@ -118,7 +118,12 @@ const eq = (n, a, b) => { ck(n, JSON.stringify(a) === JSON.stringify(b));
   eq("ref-haines-value-surfaced", [mean.rec.wx.hainesH[0], mean.rec.wx.hainesM[0]], [6, 5]);
   eq("ref-hdw-sev", mean.rec.rows.hdw[0], 2);                    /* 160 in [150,250) band */
   eq("ref-wind-E1", [mean.rec.rows.wind[0], mean.rec.rows.gust[0]], [1, 1]);  /* 10 mph, 20 mph under E1 */
-  ck("ref-dl-cape", mean.rec.dl[0] === 3);                        /* dry + cape 600 */
+  ck("ref-dl-cape-R1b", mean.rec.dl[0] === 0);                    /* cape 600 < watch floor */
+  { const sW = JSON.parse(JSON.stringify(samples));
+    for (const smp of sW) for (const k of days7){ smp.d.d[k].cape = 1500; }
+    ck("ref-dl-watch", c3.refinedFromSamples(sW, N, 1200, "mean").rec.dl[0] === 2);
+    for (const smp of sW) for (const k of days7){ smp.d.d[k].cape = 2600; }
+    ck("ref-dl-bolt", c3.refinedFromSamples(sW, N, 1200, "mean").rec.dl[0] === 3); }
   ck("ref-score-sane", mean.rec.s[0] > 1.5 && mean.rec.s[0] < 3.5 && mean.rec.t[0] != null);
   const noN = c3.refinedFromSamples(samples, null, 1200, "mean");
   eq("ref-abs-basis", noN.basis, "abs");

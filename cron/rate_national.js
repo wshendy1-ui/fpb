@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /* =========================================================================
-   FPB — rate_national.js (v1.2)
+   FPB — rate_national.js (v1.4)
    Daily national zone ratings: forecast (Open-Meteo, single model, batched
    multi-point) × precomputed climatology (climo-fetcher output) → per-zone
    per-day composite tier via the extracted v83 engine.
@@ -28,6 +28,12 @@
    (tmax/rhmin/rhrec/wind/gust/pop/cape/precip) and per-row severities +
    weights + ladder tag for the map panel, top-2 drivers/inhibitors, and
    ladder calibration; parse failures now log a response snippet.
+   v1.3: ladder tag bumped to v83-normalT2-wgE1 — wind/gust ladders
+   recalibrated in engine constants per the 2026-07-15 calibration memo
+   (median daily-max day now scores sev 2, not 3/4). No cron logic change;
+   the engine constant flows through automatically.
+   v1.4: ladder tag + dlR1b — dry-lightning CAPE fallback recalibrated in
+   engine v1.4 (pop<30 gate; 1000 -> watch sev2; 2000 -> bolt sev3).
    ========================================================================= */
 "use strict";
 const fs = require("fs");
@@ -228,7 +234,7 @@ async function run(){
     pointset_version: "poi-v1",
     model: MODEL,
     composite: "national-v1 (tmax/rhmin/rhrec sigma + wind/gust/pop abs + dry-ltg CAPE path)",
-    ladder: "v83-normalT2",
+    ladder: "v83-normalT2-wgE1-dlR1b",
     weights: { tmax:C.THR_DEF.tmax.w, rhmin:C.THR_DEF.rhmin.w, rhrec:C.THR_DEF.rhrec.w,
                wind:C.THR_DEF.wind.w, gust:C.THR_DEF.gust.w, pop:C.THR_DEF.pop.w, dryltg:C.W_DRY },
     days: daysRef || [],
