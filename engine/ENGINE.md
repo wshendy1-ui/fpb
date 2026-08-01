@@ -125,6 +125,10 @@ All field-tunable constants, verbatim except one calibrated change: `THR_DEF` (6
 - **`horizonDrivers/Moderators`** read `c.id`/`c.nm`/`c.cv` off contrib entries;
   when building entries for `scoreContribs`, include `nm` and `cv` if you want
   driver/moderator strings.
+- **Percentile-band wind scoring (v1.3 addition)**: `bandLadder`/`windSev`/
+  `wetFreqAt` consume fpb-climo-2 `bands` — ladder [q15,q30,q75,q95] mirrors
+  the sigma ladder's exceedance structure (median day → sev 2); zones without
+  bands fall back to the absolute E1 ladders (`basis:"abs"`).
 - **`parseOmOne` zero-RH guard (v1.2, deliberate deviation from v83)**: hourly
   `relative_humidity_2m == 0` is treated as a trailing-horizon padding sentinel
   and excluded from RHmin/RH-recovery — some models pad day 7 with zeros, which

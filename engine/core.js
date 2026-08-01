@@ -163,6 +163,29 @@ function ffwiHour(tF,rh,mph){
   return Math.max(0,eta*Math.sqrt(1+mph*mph)/0.3002);
 }
 /* v83:600 */ function hdwHour(vpdKPa,mph){return (vpdKPa*10)*(mph*0.44704);}
+
+/* ---- fpb-climo-2 percentile bands (v1.3 addition, not in v83) ----
+   Stored quantiles per MM-DD are [q15,q30,q50,q75,q95]; the scoring ladder
+   is [q15,q30,q75,q95] — the same exceedance structure as the sigma ladder
+   (≈ −1.0σ/−0.5σ/+0.75σ/+1.5σ), so a median day scores sev 2. q50 is
+   informational (charts). Falls back to the absolute E1 ladders when a
+   zone has no bands — the same graceful chain as devSev. */
+function bandLadder(bands,kind,dateKey){
+  if(!bands)return null;
+  const q=bands[kind+"Q"]&&bands[kind+"Q"][String(dateKey).slice(5)];
+  if(!q||q.length<5||q[0]==null)return null;
+  return [q[0],q[1],q[3],q[4]];
+}
+function windSev(bands,kind,dateKey,v,fallbackThr){
+  const lad=bandLadder(bands,kind,dateKey);
+  if(lad)return {s:sevFromThr(v,lad,1),basis:"pctl",lad:lad};
+  return {s:sevFromThr(v,fallbackThr,1),basis:"abs",lad:fallbackThr};
+}
+function wetFreqAt(bands,dateKey){
+  if(!bands||!bands.wetFreq)return null;
+  const v=bands.wetFreq[String(dateKey).slice(5)];
+  return v==null?null:v;
+}
 /* v83:602-603 */
 function ramp(x,a,b){return Math.max(0,Math.min(1,(x-a)/(b-a)));}
 function gsiDaily(tminC,vpdKPa,daylenHr){return ramp(tminC,-2,5)*(1-ramp(vpdKPa,0.9,4.1))*ramp(daylenHr,10,11);}
@@ -407,7 +430,7 @@ return {
   HAINES_VAR,HDW_LVLS,HAINES_PL,WX_FIELDS,WX_DIR,COMPASS16,MOD_PHRASE,
   fmBase,bucketOf,confBand,num,
   ercY,kbdiStep,ffwiHour,hdwHour,ramp,gsiDaily,isoDurHours,
-  sevFromThr,ercSev,ercBand,hainesTerm,hainesAt,hainesApplicableFromElev,hainesWeight,
+  sevFromThr,bandLadder,windSev,wetFreqAt,ercSev,ercBand,hainesTerm,hainesAt,hainesApplicableFromElev,hainesWeight,
   compass16,pctlFromQ,normDateKey,
   wxDep,wxSigma,sigTier,devSev,devBasis,
   dryLightning,lalFromPot,lalSev,rfwSev,
