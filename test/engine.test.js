@@ -214,6 +214,24 @@ for (const [v,want] of [[7.9,0],[8,1],[12.9,1],[13,2],[17.9,2],[18,3],[24.9,3],[
 for (const [v,want] of [[14.9,0],[15,1],[21.9,1],[22,2],[29.9,2],[30,3],[39.9,3],[40,4]])
   eq("E1-gust v="+v, C.sevFromThr(v,C.THR_DEF.gust.t,1), want);
 
+/* v1.3 — percentile-band wind scoring (fpb-climo-2), exact boundaries + fallback */
+{
+  const bands = { window:14, qkeys:[15,30,50,75,95],
+    windQ:{ "07-15":[6.2, 8.9, 12.4, 16.1, 22.8] },
+    gustQ:{ "07-15":[9.0, 13.5, 19.7, 26.2, 35.4] },
+    wetFreq:{ "07-15": 7.3 } };
+  eq("band-ladder", C.bandLadder(bands,"wind","2026-07-15"), [6.2,8.9,16.1,22.8]);
+  eq("band-ladder-missing-md", C.bandLadder(bands,"wind","2026-01-01"), null);
+  eq("band-ladder-null-bands", C.bandLadder(null,"wind","2026-07-15"), null);
+  for (const [v,want] of [[6.1,0],[6.2,1],[8.8,1],[8.9,2],[16.0,2],[16.1,3],[22.7,3],[22.8,4]])
+    eq("band-wind v="+v, C.windSev(bands,"wind","2026-07-15",v,C.THR_DEF.wind.t).s, want);
+  eq("band-basis", C.windSev(bands,"wind","2026-07-15",10,C.THR_DEF.wind.t).basis, "pctl");
+  const fb = C.windSev(bands,"wind","2026-01-01",10,C.THR_DEF.wind.t);
+  eq("band-fallback", [fb.basis, fb.s], ["abs", 1]);          /* 10 mph vs E1 [8,13,18,25] */
+  eq("band-gust", C.windSev(bands,"gust","2026-07-15",26.2,C.THR_DEF.gust.t).s, 3);
+  eq("wetFreqAt", [C.wetFreqAt(bands,"2026-07-15"), C.wetFreqAt(bands,"2026-02-01"), C.wetFreqAt(null,"2026-07-15")], [7.3, null, null]);
+}
+
 for (const [d,want] of [
   [{pot:5,precip:0,rhmin:30},[2,"DRY LTG"]],[{pot:9.9,precip:0,rhmin:30},[2,"DRY LTG"]],
   [{pot:10,precip:0,rhmin:30},[3,"DRY LTG"]],[{pot:15,precip:0,rhmin:30},[4,"DRY LTG"]],

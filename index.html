@@ -232,7 +232,7 @@ select,.btn{background:var(--panel2); color:var(--text); border:1px solid var(--
 <div id="app">
 
   <header>
-    <div class="brand"><h1>Fire potential briefing</h1><span class="sub">v2.3.1</span></div>
+    <div class="brand"><h1>Fire potential briefing</h1><span class="sub">v2.4</span></div>
     <div id="hdrZone">loading…</div>
     <div class="pills">
       <div id="outlooksWrap">
@@ -500,11 +500,11 @@ function normalizeZoneQuery(s){
   return m[1]+"Z"+m[2].padStart(3,"0");
 }
 function fillExpr(day){
-  return ["match", ["coalesce", ["get","t"+day], -1],
+  return ["match", ["coalesce", ["feature-state","rt"+day], ["get","t"+day], -1],
     0,TIER_COLORS[0], 1,TIER_COLORS[1], 2,TIER_COLORS[2], 3,TIER_COLORS[3], 4,TIER_COLORS[4],
     NODATA_COLOR];
 }
-function dlFilter(day){ return [">=", ["coalesce", ["get","dl"+day], 0], DL_MIN]; }
+function dlFilter(day){ return [">=", ["coalesce", ["feature-state","rdl"+day], ["get","dl"+day], 0], DL_MIN]; }
 function ringBboxCenter(ring){
   let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;
   for (const p of ring){ if(p[0]<x0)x0=p[0]; if(p[0]>x1)x1=p[0]; if(p[1]<y0)y0=p[1]; if(p[1]>y1)y1=p[1]; }
@@ -827,7 +827,8 @@ function renderLegend(){
   $("legend").innerHTML = ADJ_S.map((n,i)=>
     "<span class='sw'><i style='background:"+TIER_COLORS[i]+"'></i>"+n+"</span>").join("")+
     "<span class='sw'><i style='background:"+NODATA_COLOR+"'></i>NO DATA</span>"+
-    "<span class='sw'>⚡ T"+DL_MIN+"+</span>";
+    "<span class='sw'>⚡ T"+DL_MIN+"+</span>"+
+    "<span class='sw'><i style='background:transparent; border:1.5px dashed #e8842a'></i>REFINED</span>";
 }
 function renderPills(){
   const age = fmtAge(S.doc.generated, Date.now());
@@ -886,14 +887,17 @@ function makeBoltImage(){
   } catch(e){ return null; }
 }
 function addAppLayers(zonesGeo, dlGeo){
-  map.addSource("zones", { type:"geojson", data:zonesGeo });
+  map.addSource("zones", { type:"geojson", data:zonesGeo, promoteId:"id" });
   map.addLayer({ id:"zones-fill", type:"fill", source:"zones",
     paint:{ "fill-color": fillExpr(0), "fill-opacity": FILL_OPACITY } });
   map.addLayer({ id:"zones-line", type:"line", source:"zones",
     paint:{ "line-color":"#0f1318", "line-width":0.6 } });
+  map.addLayer({ id:"zones-refined", type:"line", source:"zones",
+    paint:{ "line-color":"#e8842a", "line-width":1.6, "line-dasharray":[2,1.5],
+      "line-opacity":["case",["boolean",["feature-state","refined"],false],0.95,0] } });
   map.addLayer({ id:"zones-sel", type:"line", source:"zones",
     filter:["==",["get","id"],""], paint:{ "line-color":"#e8e4da", "line-width":2.2 } });
-  map.addSource("dl", { type:"geojson", data:dlGeo });
+  map.addSource("dl", { type:"geojson", data:dlGeo, promoteId:"id" });
   const bolt = makeBoltImage();
   if (bolt && map.addImage){
     map.addImage("dl-bolt", bolt);
@@ -913,12 +917,15 @@ function addAppLayers(zonesGeo, dlGeo){
   map.on("mousemove","zones-fill", e=>{
     const f = e.features && e.features[0]; if (!f) return;
     map.getCanvas().style.cursor = "pointer";
-    const id = f.properties.id, rec = S.doc.zones[id];
+    const id = f.properties.id;
+    const ref = S.refined[id];
+    const rec = ref ? ref.rec : S.doc.zones[id];
     const t = rec ? rec.t[S.day] : null;
     tip.style.display="block";
     tip.style.left=(e.point.x+14)+"px"; tip.style.top=(e.point.y+14)+"px";
     tip.innerHTML = "<b>"+id+"</b> — "+(f.properties.name||"")+
-      "<div class='t2'>"+(t==null?"no rating":(ADJ[t]+" · "+scoreTxt(rec.s[S.day])))+"</div>";
+      "<div class='t2'>"+(t==null?"no rating":(ADJ[t]+" · "+scoreTxt(rec.s[S.day])))+
+      (ref?" <span style='color:#e8842a'>· REFINED</span>":"")+"</div>";
   });
   map.on("mouseleave","zones-fill", ()=>{ map.getCanvas().style.cursor=""; tip.style.display="none"; });
 }
@@ -998,7 +1005,17 @@ function computeRefined(id){
   out.nModels = sc.samples.length; out.mode = S.aggMode; out.when = Date.now();
   out.diag = { perModel: sc.perModel, avail: sc.avail };
   S.refined[id] = out;
+  applyRefinedToMap(id);
   renderMatrix(); renderPanel(); renderBriefing();
+}
+/* choropleth + ⚡ overlay adopt the refined values for this zone (session-scoped) */
+function applyRefinedToMap(id){
+  const ref = S.refined[id];
+  if (!map || !map.setFeatureState || !ref) return;
+  const zs = { refined:true }, ds = {};
+  for (let i = 0; i < NDAYS; i++){ zs["rt"+i] = ref.rec.t[i]==null?-1:ref.rec.t[i]; ds["rdl"+i] = ref.rec.dl[i]||0; }
+  try { map.setFeatureState({ source:"zones", id }, zs);
+        map.setFeatureState({ source:"dl", id }, ds); } catch(e){}
 }
 
 /* ---------- zone briefing (option A) ---------- */

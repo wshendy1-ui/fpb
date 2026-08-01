@@ -41,8 +41,9 @@ const eq = (n, a, b) => { ck(n, JSON.stringify(a) === JSON.stringify(b));
   eq("dayLabel-dow", ctx.dayLabel("2026-07-16", 1), "Thu 16");
   eq("normalize", ["orz693", "or 693", "OR693", "wyz-275", "693", "ORZ0693"].map(ctx.normalizeZoneQuery),
     ["ORZ693", "ORZ693", "ORZ693", "WYZ275", null, null]);
-  eq("fillExpr-day-indexed", ctx.fillExpr(3)[1][1][1], "t3");
-  eq("dlFilter", ctx.dlFilter(2), [">=", ["coalesce", ["get", "dl2"], 0], ctx.DL_MIN]);
+  eq("fillExpr-fstate-first", ctx.fillExpr(3)[1][1], ["feature-state","rt3"]);
+  eq("fillExpr-day-indexed", ctx.fillExpr(3)[1][2], ["get","t3"]);
+  eq("dlFilter", ctx.dlFilter(2), [">=", ["coalesce", ["feature-state","rdl2"], ["get","dl2"], 0], ctx.DL_MIN]);
   {
     const feats = [
       { properties: { id: "ORZ693", name: "Canyon Grassland" },
@@ -197,6 +198,7 @@ class StubMap {
   setPaintProperty(id, k, v){ this.paints.push([id, k, JSON.stringify(v)]); }
   setFilter(id, f){ this.filters[id] = f; }
   setLayoutProperty(id, k, v){ this.layout.push([id, k, v]); }
+  setFeatureState(t, s){ (this.fstates = this.fstates || []).push([t.source, t.id, s]); }
   addImage(id, img){ (this.images = this.images || []).push(id); }
   hasImage(id){ return (this.images || []).includes(id); }
   getCanvas(){ return { style: {} }; }
@@ -351,6 +353,20 @@ setTimeout(() => {
     $("modeHigh").dispatchEvent(new w.Event("change"));
     ck("refine-high-tmax", w.eval("S.refined.ORZ693.rec.wx.tmax[0]") === 96);
     ck("refine-mode-persist", w.localStorage.getItem("fpb.aggmode.v1") === "high");
+
+    /* v2.4 — refined choropleth sync */
+    ck("promoteId", mapStub.sources.zones.promoteId === "id" && mapStub.sources.dl.promoteId === "id");
+    ck("refined-layer", !!mapStub.layers["zones-refined"]);
+    const zfs = (mapStub.fstates||[]).filter(f => f[0]==="zones" && f[1]==="ORZ693");
+    ck("refined-fstate", zfs.length >= 1 && zfs[zfs.length-1][2].refined === true &&
+       zfs[zfs.length-1][2].rt0 === w.eval("S.refined.ORZ693.rec.t[0]"));
+    ck("refined-dl-fstate", (mapStub.fstates||[]).some(f => f[0]==="dl" && f[1]==="ORZ693" && f[2].rdl0 != null));
+    ck("fill-expr-fstate", JSON.stringify(w.eval("fillExpr(0)")).indexOf("feature-state") >= 0);
+    /* tooltip shows refined */
+    const mh = mapStub.handlers["mousemove:zones-fill"];
+    mh({ features:[{ properties:{ id:"ORZ693", name:"Canyon" } }], point:{ x:5, y:5 } });
+    ck("tooltip-refined", $("tip").innerHTML.indexOf("REFINED") >= 0);
+    ck("legend-refined", $("legend").innerHTML.indexOf("REFINED") >= 0);
 
     /* v2.1 — HDW anchors end-to-end */
     $("hdwP75").value = "150"; $("hdwP95").value = "300";
