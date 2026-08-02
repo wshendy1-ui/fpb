@@ -375,6 +375,7 @@ a.smallbtn{text-decoration:none;color:var(--ink);display:inline-block}
       </details>
       <details class="adv"><summary>Manual NFDRS fallback (used only when no station data exists)</summary>
       <div class="frow">
+        <p class="hint" style="grid-column:1/-1;margin:0 0 2px">Applies to <b>today only</b> — entries are dated and stop feeding the matrix tomorrow; cells show a \u201cmanual\u201d tag. FEMS data for today, when present, always wins.</p>
         <div class="fld"><label>ERC (Y)</label><input type="number" id="f_erc" step="0.1"></div>
         <div class="fld"><label>BI</label><input type="number" id="f_bi" step="0.1"></div>
         <div class="fld"><label>IC</label><input type="number" id="f_ic" step="1"></div>
@@ -680,7 +681,7 @@ const OM_MODELS_FULL=["gfs_seamless","ecmwf_ifs025","icon_seamless","gem_seamles
 const OM_MODELS_LEAN=["gfs_seamless","ecmwf_ifs025"];
 function omModels(){return state.ensMode==="full"?OM_MODELS_FULL:OM_MODELS_LEAN;}
 function ensembleLab(){return state.ensMode==="full"?((OM_MODELS_FULL.length+1)+" · full ensemble"):((OM_MODELS_LEAN.length+1)+" · lean (GFS+ECMWF+NWS)");}
-const APP_VERSION="89"; /* PWA — bump together with sw.js CACHE on every release */
+const APP_VERSION="90"; /* PWA — bump together with sw.js CACHE on every release */
 const MAX_RAWS=5; /* v84: station cap per area — API discipline; pickers rank active-first, then nearest */
 const PDS_RE=/particularly\s+dangerous\s+situation/i; /* v84: PDS wording inside a Red Flag Warning — display only */
 /* ==================== v86: narrative pools — driven by / held in check ==================== */
@@ -1299,6 +1300,10 @@ document.addEventListener("visibilitychange",()=>{if(document.visibilityState===
 function area(){return state.areas[state.areaId]||Object.values(state.areas)[0];}
 function migrate(){
   state.fuelsToday=Object.assign({erc:"",bi:"",ic:"",fm100:"",fm1000:"",lfm:"",lfw:"",kbdi:""},state.fuelsToday||{});
+  /* v90: values from before date-stamping are from an unknown earlier day — they stay visible in the
+     inputs but no longer auto-apply; say why day 0 just changed, once. */
+  if(state.fuelsTodayDate===undefined&&Object.values(state.fuelsToday).some(v=>v!==""&&v!=null))
+    setTimeout(()=>toast("Manual today-fuels from a previous session no longer auto-apply \u2014 retype a value to use it today"),2100);
   /* v2→v3: saved PSAs become generic forecast areas; old user data wins over fresh seeds */
   if(state.psas){for(const k in state.psas)state.areas[k]=state.psas[k];delete state.psas;}
   if(state.psaId){state.areaId=state.psaId;delete state.psaId;}
@@ -1309,6 +1314,7 @@ function migrate(){
     if(!p.type)p.type=/^FDRA/i.test(p.id)?"FDRA":"PSA";
     if(!p.fuelModel)p.fuelModel="Y";
     pruneFems(p); /* slim legacy states on first load */
+    if(!p.ercBreaks)p.ercBreaks=Object.assign({},DEF_BREAKS); /* v90: very old or hand-imported areas could lack breakpoints and crash the panels */
     /* v84: station cap — trim saved selections beyond MAX_RAWS (order preserved; pickers rank active+nearest) */
     {let nSel=0,trim=0;(p.stations||[]).forEach(s=>{if(s&&s.sel){nSel++;if(nSel>MAX_RAWS){s.sel=false;trim++;}}});
      if(trim){const nm=p.name||p.fdraName||p.id;setTimeout(()=>toast("Station cap: "+trim+" saved selection"+(trim===1?"":"s")+" in "+nm+" unselected — max "+MAX_RAWS),1500);}}
@@ -2475,7 +2481,8 @@ function buildAlerts(list){
   }
 }
 function kbdiSeries(){
-  const q0=num(state.fuelsToday.kbdi);if(q0==null)return fx.days.map(()=>null);
+  const q0=(state.fuelsTodayDate===fx.days[0])?num(state.fuelsToday.kbdi):null; /* v90: a stale manual KBDI no longer anchors the forward projection */
+  if(q0==null)return fx.days.map(()=>null);
   const p=area();let q=q0,carry=0;const out=[q0];
   for(let i=1;i<7;i++){const d=dd(i-1);
     if(d.tmax==null){out.push(null);continue;}
@@ -2823,7 +2830,9 @@ function fuelField(i,f){
     if(FM_VARY[f]){const m=area().fuelModel||"Y";fv=fr[f+"_"+m];if(fv==null&&m==="Y")fv=fr[f];} /* plain keys are historic Y data */
     else{fv=fr[f];if(fv==null&&f==="lfw")fv=fr.woody;} /* data saved under the legacy key */
     if(fv!=null)return{v:fv,from:"fems"};}
-  if(i===0){const v=num(state.fuelsToday[f]);if(v!=null)return{v:v,from:"today"};}
+  if(i===0&&state.fuelsTodayDate===fx.days[0]){ /* v90: manual today-values apply ONLY on the day they were entered —
+     stale scratchpad numbers (including the sample set) no longer leak into every fresh zone's day 0 */
+    const v=num(state.fuelsToday[f]);if(v!=null)return{v:v,from:"today"};}
   return{v:null};
 }
 /* One-time WX normals: ~30 years of ERA5 daily history at the primary point →
@@ -3117,7 +3126,9 @@ function climoSub(id){return (i,r)=>{
   const p=pctlFromQ(q,r.v);
   return p==null?null:("p"+Math.round(p));};}
 function fuelRow(id,fmt,subFn){return{
-  id:id,val:i=>{const r=fuelField(i,id);return{v:r.v,txt:fmt(r.v),from:r.from,sub:subFn?subFn(i,r):null};},
+  id:id,val:i=>{const r=fuelField(i,id);let sb=subFn?subFn(i,r):null;
+    if(r.from==="today")sb=(sb?sb+" \u00b7 ":"")+"manual"; /* v90: hand-entered day-0 values are labeled, never disguised as FEMS */
+    return{v:r.v,txt:fmt(r.v),from:r.from,sub:sb};},
   sev:(i,v)=>sevFromThr(v,T(id).t,T(id).asc),w:()=>T(id).w,editable:true};}
 const ROWS=[
  {grp:"Forecast weather",gnote:"auto · Open-Meteo + NWS"},
@@ -3543,7 +3554,9 @@ document.addEventListener("click",e=>{
 /* ==================== PANELS / UI WIRING ==================== */
 function toast(m){const t=$("toast");t.textContent=m;t.classList.add("show");clearTimeout(t._x);
   t._x=setTimeout(()=>t.classList.remove("show"),Math.min(10000,Math.max(2600,1200+String(m).length*45)));}
-function bindFuel(id,f){$(id).value=state.fuelsToday[f];$(id).oninput=()=>{state.fuelsToday[f]=$(id).value;persist();renderAll();};}
+function bindFuel(id,f){$(id).value=state.fuelsToday[f];$(id).oninput=()=>{state.fuelsToday[f]=$(id).value;
+  state.fuelsTodayDate=fx.days[0]; /* v90: entries are dated — they stop feeding the matrix tomorrow */
+  persist();renderAll();};}
 function renderPanels(){
   const p=area();
   bindFuel("f_erc","erc");bindFuel("f_bi","bi");bindFuel("f_ic","ic");
@@ -4007,7 +4020,9 @@ function calcRecalc(){
 }
 function boot(){
   ["c_fm1","c_fm10","c_fm100","c_fm1000","c_kbdi"].forEach(id=>$(id).oninput=calcRecalc);
-  $("useErcBtn").onclick=()=>{state.fuelsToday.erc=calcRecalc().toFixed(1);$("f_erc").value=state.fuelsToday.erc;persist();renderAll();toast("Today's ERC set from calculator");};
+  $("useErcBtn").onclick=()=>{state.fuelsToday.erc=calcRecalc().toFixed(1);$("f_erc").value=state.fuelsToday.erc;
+    state.fuelsTodayDate=fx.days[0]; /* v90 */
+    persist();renderAll();toast("Today's ERC set from calculator (applies today only)");};
   $("fetchBtn").onclick=()=>runFetchAll(true,true);
   $("pullFemsBtn").onclick=async()=>{
     const b=$("pullFemsBtn");
@@ -4359,7 +4374,8 @@ function boot(){
   $("clearOvrBtn").onclick=()=>{area().overrides={};persist();renderAll();toast("Cell overrides cleared for this area");};
   $("sampleBtn").onclick=()=>{
     state.fuelsToday={erc:"63",bi:"52",ic:"68",fm100:"8.4",fm1000:"10.6",lfm:"95",lfw:"112",kbdi:"320"};
-    persist();renderPanels();renderAll();toast("Sample fuels loaded — weather still comes from Fetch");};
+    state.fuelsTodayDate=fx.days[0]; /* v90: dated like any manual entry — expires tonight instead of haunting day 0 forever */
+    persist();renderPanels();renderAll();toast("Sample fuels loaded for today only — cells tag them 'manual'; weather still comes from Fetch");};
   renderPanels();calcRecalc();renderAll();
   if(state.autoFetch&&area()&&area().lat!=null)runFetchAll(false); /* nothing to fetch until a point is resolved */
 }
