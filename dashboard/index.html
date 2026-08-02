@@ -530,6 +530,7 @@ a.smallbtn{text-decoration:none;color:var(--ink);display:inline-block}
       <h3>Method &amp; sources</h3>
       <p class="hint" style="margin-bottom:6px">
         <b>Auto</b>: temp, RH, RH recovery, wind/gusts, precip, CAPE, VPD (Open-Meteo); thunder prob, Haines, LAL, mixing height, transport wind (NWS gridpoints); Red Flag/Watch (NWS alerts).<br>
+        <b>Nature of the numbers</b>: weather rows are an Open-Meteo/NWS model consensus for the point — <i>not</i> the RAWS point forecast. Fuels rows come from the FEMS observation + forecast datasets as of your last refresh — close to, but not a live mirror of, the FEMS site: issuance timing, multi-station aggregation, and the daily worst-case reduction can each move the numbers a few points.<br>
         <b>Computed here</b>: HDW (max hourly VPD×wind), Fosberg FFWI, ventilation index, GSI, 7-day KBDI projection, ERC via your verified NFDRS4 fuel-model-Y port — each derived inside every point×model sample before aggregation.<br>
         NFDRS values pull per RAWS station from FEMS (API or CSV) and aggregate across the area — mean or max, your call. Hourly FEMS exports reduce to the daily worst case (index max / moisture min, any hour). SPC / NWCC / CPC products are linked from the Outlooks card.<br>
         Composite = weighted mean severity (0–4) → Low / Moderate / High / Very High / Extreme. Days 2–4 and 5–7 banners lean toward their worst day (60% max, 40% mean). Overridden cells show an orange dot.
@@ -679,7 +680,7 @@ const OM_MODELS_FULL=["gfs_seamless","ecmwf_ifs025","icon_seamless","gem_seamles
 const OM_MODELS_LEAN=["gfs_seamless","ecmwf_ifs025"];
 function omModels(){return state.ensMode==="full"?OM_MODELS_FULL:OM_MODELS_LEAN;}
 function ensembleLab(){return state.ensMode==="full"?((OM_MODELS_FULL.length+1)+" · full ensemble"):((OM_MODELS_LEAN.length+1)+" · lean (GFS+ECMWF+NWS)");}
-const APP_VERSION="88"; /* v88: PWA — bump together with sw.js CACHE on every release */
+const APP_VERSION="89"; /* PWA — bump together with sw.js CACHE on every release */
 const MAX_RAWS=5; /* v84: station cap per area — API discipline; pickers rank active-first, then nearest */
 const PDS_RE=/particularly\s+dangerous\s+situation/i; /* v84: PDS wording inside a Red Flag Warning — display only */
 /* ==================== v86: narrative pools — driven by / held in check ==================== */
@@ -2348,6 +2349,14 @@ function drawFdra(fd,lat,lon,radMi,cands){
 function aggregateFems(){
   const p=area();const by=p.femsBy||{};const listed={};
   (p.stations||[]).forEach(s=>{listed[s.id]=!!s.sel;});
+  /* v89: ghost purge — stations REMOVED from the roster kept contributing through leftover
+     stored rows (the old "ad-hoc ids count" default) and haunted the per-station table.
+     Numeric sids must be on the roster to exist here at all; pseudo sids (unattributed
+     pastes) keep their fill-in role. Re-adding a station repopulates on the next refresh. */
+  for(const day in by)for(const sid in by[day]){
+    if(PSEUDO_SIDS[sid])continue;
+    if(!(sid in listed))delete by[day][sid];
+  }
   /* stale = selected station with NO observation row for yesterday.
      Only judged when at least one selected station DOES have yesterday data,
      so old imports / first runs never exclude everyone. Stale stations stay
@@ -2368,7 +2377,7 @@ function aggregateFems(){
     for(const sid in by[day]){
       if(PSEUDO_SIDS[sid])continue;
       if(staleSet[sid])continue; /* down station: obs AND forecasts excluded */
-      const inc=(sid in listed)?listed[sid]:true; /* ad-hoc numeric ids count */
+      const inc=!!listed[sid]; /* v89: roster AND selected only — ghosts are purged above */
       if(!inc)continue;
       const r=by[day][sid];let any=0;
       for(const f in r){const v=r[f];if(v==null)continue;(acc[f]=acc[f]||[]).push(v);any=1;}
@@ -2492,10 +2501,11 @@ const CSV_FIELDS=[
  {f:"time",lab:"Time (if separate column)",re:/^time$|localtime|nfdrtime|obshour/},
  {f:"stn",lab:"Station ID",re:/stationid|^stid$|^sti$|^nwsid$|stationnumber|^station$/},
  {f:"fuelmodel",lab:"Fuel model (splits ERC/BI/IC/SC per model)",re:/fuelmodel|^fm$/},
+ {f:"nfdrtype",lab:"Row type (O = observed, F = forecast)",re:/nfdrtype|^type$/},
  {f:"erc",lab:"ERC",re:/^erc$|energyreleasecomponent|energyrelease|erc/},
- {f:"bi",lab:"BI",re:/^bi$|burningindex|^burning/},
- {f:"ic",lab:"IC",re:/^ic$|ignitioncomponent|ignition/},
- {f:"sc",lab:"SC",re:/^sc$|spreadcomponent|^spread/},
+ {f:"bi",lab:"BI",re:/^bi$|avgbi$|burningindex|^burning/}, /* v89: FEMS table exports prefix "Avg" — ground truth says the values are the daily HIGH */
+ {f:"ic",lab:"IC",re:/^ic$|avgic$|ignitioncomponent|ignition/},
+ {f:"sc",lab:"SC",re:/^sc$|avgsc$|spreadcomponent|^spread/},
  {f:"fm1000",lab:"1000-hr FM",re:/thousand|(^|[^0-9])1000/},
  {f:"fm100",lab:"100-hr FM",re:/hundred|(^|[^0-9])100(hr|hour)/},
  {f:"fm10",lab:"10-hr FM",re:/ten(hr|hour)|(^|[^0-9])10(hr|hour)/},
@@ -2505,7 +2515,7 @@ const CSV_FIELDS=[
  {f:"woody",lab:"Woody live FM",re:/wood/},
  {f:"kbdi",lab:"KBDI",re:/kbdi/}
 ];
-const CSV_META={date:1,time:1,stn:1,fuelmodel:1};
+const CSV_META={date:1,time:1,stn:1,fuelmodel:1,nfdrtype:1};
 function normHdr(h){return String(h==null?"":h).toLowerCase().replace(/[^a-z0-9]/g,"");}
 function splitDelim(l,d){const out=[];let cur="",q=false;
   for(const ch of l){if(ch==='"'){q=!q;}else if(ch===d&&!q){out.push(cur);cur="";}else cur+=ch;}
@@ -2614,7 +2624,8 @@ function collectCsvEntries(parsed,map,srcId,forceSid){
       else vals[def.f]=v; /* moistures & KBDI are model-independent */
     }
     if(!Object.keys(vals).length)continue;
-    entries.push({sid:sid,day:day,hour:hourFrom(c[map.date],map.time!=null?c[map.time]:null),vals:vals});
+    const typ=(map.nfdrtype!=null&&c[map.nfdrtype])?String(c[map.nfdrtype]).trim().toUpperCase().slice(0,1):null;
+    entries.push({sid:sid,day:day,typ:typ,hour:hourFrom(c[map.date],map.time!=null?c[map.time]:null),vals:vals});
   }
   return entries;
 }
@@ -2630,7 +2641,10 @@ function reduceEntriesDaily(entries){
   const groups={};const out=[];
   for(const e of entries){(groups[e.sid+"|"+e.day]=groups[e.sid+"|"+e.day]||[]).push(e);}
   for(const k in groups){
-    const g=groups[k].slice();const sid=g[0].sid,day=g[0].day;
+    let g=groups[k].slice();const sid=g[0].sid,day=g[0].day;
+    /* v89: FEMS table exports mix observed (O) and forecast (F) rows in one file — when a
+       date carries both, the observation wins outright. API pulls are homogeneous per call. */
+    if(g.some(e=>e.typ==="O")&&g.some(e=>e.typ==="F"))g=g.filter(e=>e.typ!=="F");
     g.sort((a,b)=>{ /* nearest-13:00 first: only matters for direction-less fields */
       const ah=a.hour==null?99:Math.abs(a.hour-13),bh=b.hour==null?99:Math.abs(b.hour-13);
       return (ah-bh)||((b.hour==null?-1:b.hour)-(a.hour==null?-1:a.hour));
@@ -2670,6 +2684,11 @@ function storeFemsRows(entries){
     w[r.sid]=1;
   }
   LAST_IMPORT={sids:Object.keys(w)};
+  /* v89: rows for stations not on this area's roster get dropped by the ghost purge —
+     say so instead of importing them into silence. */
+  const roster={};(p.stations||[]).forEach(s=>{roster[String(s.id)]=1;});
+  const orphan=Object.keys(w).filter(sid=>!PSEUDO_SIDS[sid]&&!roster[sid]);
+  if(orphan.length)toast("Ignored rows for station"+(orphan.length===1?" ":"s ")+orphan.join(", ")+" — not on this area's station list (add the station first)");
   aggregateFems();
   return recs.length;
 }
@@ -3181,7 +3200,7 @@ const ROWS=[
     return{v:v,txt:v==null?null:String(Math.round(v)),
       sub:(d.mix!=null&&d.tws!=null)?((Math.round(d.mix/100)/10)+"kft × "+Math.round(d.tws*0.868976)+"kt"):null};},
   sev:(i,v)=>sevFromThr(v,T("vi").t,T("vi").asc)},
- {grp:"Fuels & NFDRS — model Y",gnote:"FEMS auto · click cells to override"},
+ {grp:"Fuels & NFDRS — model Y",gnote:"FEMS auto — not a live mirror of the FEMS site (see Method & sources) · click cells to override"},
  Object.assign(fuelRow("erc",r1,(i,r)=>r.v==null?null:ercBand(r.v,area().ercBreaks)),
    {nm:"Energy Release Component",un:()=>"ERC-"+(area().fuelModel||"Y"),src:"auto",desc:"Energy Release Component (selected NFDRS 2016 fuel model) \u2014 potential heat release in the flaming front; the seasonal fuel-dryness backbone of NFDRS. Scored against this area\u2019s climatological breakpoints (p80/p90/p97).",
     sev:(i,v)=>ercSev(v,area().ercBreaks),w:()=>W_ERC}),
@@ -3622,8 +3641,10 @@ function renderStations(){
 function renderBreakdown(){
   const p=area();const by=p.femsBy||{};
   const days=Object.keys(by).sort();
-  const ids={};(p.stations||[]).forEach(s=>{ids[s.id]=s.name;});
-  for(const day of days)for(const sid in by[day])if(!(sid in ids))ids[sid]=PSEUDO_SIDS[sid]?(sid+" (unattributed)"):sid;
+  const ids={},selOf={};(p.stations||[]).forEach(s=>{ids[s.id]=s.name;selOf[s.id]=!!s.sel;});
+  /* v89: only roster stations + unattributed pastes appear here — ghosts are purged in the
+     aggregate, and deselected stations are tagged so this table reads exactly like the composite. */
+  for(const day of days)for(const sid in by[day])if(!(sid in ids)&&PSEUDO_SIDS[sid])ids[sid]=sid+" (unattributed)";
   const today=fx.days[0];
   const md=k=>{const m=/^\d{4}-(\d{2})-(\d{2})/.exec(k);return m?((+m[1])+"/"+(+m[2])):k;};
   const cell=v=>(v==null?"—":v);
@@ -3638,7 +3659,7 @@ function renderBreakdown(){
     const t=obsDay?by[obsDay][sid]:{};
     const useF=fcDay&&fcDay>today;
     const f7=useF?by[fcDay][sid]:{};
-    return "<tr><td>"+esc(ids[sid])+(staleSet[sid]?' <span class="stale-tag">skipped</span>':"")+"</td><td>"+(obsDay?md(obsDay):"—")+"</td><td>"+cell(t.erc)+"</td><td>"+cell(t.bi)+"</td><td>"+cell(t.fm100)+"</td><td>"+cell(t.fm1000)+"</td><td>"+(useF?md(fcDay):"—")+"</td><td>"+cell(f7.erc)+"</td></tr>";
+    return "<tr><td>"+esc(ids[sid])+(selOf[sid]===false?' <span class="stale-tag">off — excluded</span>':(staleSet[sid]?' <span class="stale-tag">skipped</span>':""))+"</td><td>"+(obsDay?md(obsDay):"—")+"</td><td>"+cell(t.erc)+"</td><td>"+cell(t.bi)+"</td><td>"+cell(t.fm100)+"</td><td>"+cell(t.fm1000)+"</td><td>"+(useF?md(fcDay):"—")+"</td><td>"+cell(f7.erc)+"</td></tr>";
   }).join("");
   $("bdBody").innerHTML=rows||'<tr><td colspan="8" style="font-family:var(--sans);color:var(--muted)">No station data pulled yet.</td></tr>';
 }
