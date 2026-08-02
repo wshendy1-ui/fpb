@@ -1,0 +1,16 @@
+{
+  "name": "Fire Potential Dashboard",
+  "short_name": "Fire Potential",
+  "description": "7-day significant fire potential — weather consensus, NFDRS fuels, and NWS alerts for western fire weather zones.",
+  "start_url": "index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#1b2530",
+  "theme_color": "#1b2530",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
