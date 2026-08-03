@@ -354,9 +354,15 @@ body.mobOn{overflow:hidden}
 #mobMapBar{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-top:9px}
 #mobRoot .mmapchip{font:700 10.5px Figtree,sans-serif;border:1px solid var(--mline);border-radius:999px;padding:6px 11px;background:var(--msur);color:var(--mlab);cursor:pointer;touch-action:manipulation}
 #mobRoot .mmapchip.on{background:var(--macc);border-color:var(--macc);color:#fdf8ee}
-#mobMapSel{position:absolute;left:10px;right:10px;bottom:10px;background:rgba(253,248,238,.95);backdrop-filter:blur(10px);
-  border:1px solid var(--mline2);border-radius:14px;box-shadow:0 4px 16px rgba(90,60,20,.18);padding:10px 12px;display:none}
+/* v99: Leaflet's map panes run z-index 200-700 and #mobMap makes no stacking context,
+   so an auto-z-index sibling renders UNDERNEATH the tiles. The card must outrank them. */
+#mobMapSel{position:absolute;left:10px;right:10px;bottom:10px;z-index:1200;background:rgba(253,248,238,.96);backdrop-filter:blur(10px);
+  border:1px solid var(--mline2);border-radius:14px;box-shadow:0 6px 20px rgba(90,60,20,.22);padding:10px 12px;
+  display:none;transform:translateY(12px);opacity:0;transition:transform .18s ease,opacity .18s ease;pointer-events:auto}
 #mobMapSel.on{display:block}
+#mobMapSel.up{transform:translateY(0);opacity:1}
+/* keep Leaflet's own controls clear of the card */
+#mobMap .leaflet-bottom.leaflet-right{margin-bottom:64px}
 
 </style>
 <link rel="stylesheet" href="leaflet/leaflet.css">
@@ -809,7 +815,7 @@ const OM_MODELS_FULL=["gfs_seamless","ecmwf_ifs025","icon_seamless","gem_seamles
 const OM_MODELS_LEAN=["gfs_seamless","ecmwf_ifs025"];
 function omModels(){return state.ensMode==="full"?OM_MODELS_FULL:OM_MODELS_LEAN;}
 function ensembleLab(){return state.ensMode==="full"?((OM_MODELS_FULL.length+1)+" · full ensemble"):((OM_MODELS_LEAN.length+1)+" · lean (GFS+ECMWF+NWS)");}
-const APP_VERSION="98"; /* PWA — bump together with sw.js CACHE on every release */
+const APP_VERSION="99"; /* PWA — bump together with sw.js CACHE on every release */
 const MAX_RAWS=5; /* v84: station cap per area — API discipline; pickers rank active-first, then nearest */
 const PDS_RE=/particularly\s+dangerous\s+situation/i; /* v84: PDS wording inside a Red Flag Warning — display only */
 /* ==================== v86: narrative pools — driven by / held in check ==================== */
@@ -3826,6 +3832,16 @@ const MOB_MAP_STYLE={
   cur:{color:"#b04a20",weight:2.6,opacity:1,fillColor:"#b04a20",fillOpacity:.13},
   tap:{color:"#8f4c1d",weight:3,opacity:1,fillColor:"#c67139",fillOpacity:.22}
 };
+/* v99: which zone contains this lon/lat, straight off the cached FeatureCollection */
+function mobZoneAt(lon,lat){
+  const gj=FWZ_GJ;if(!gj||!gj.features)return null;
+  for(const f of gj.features){
+    const g=f.geometry;if(!g)continue;
+    const polys=(g.type==="Polygon")?[g.coordinates]:(g.type==="MultiPolygon")?g.coordinates:[];
+    for(const poly of polys){
+      if(pointInRings(poly,[lon,lat]))
+        return {id:f.properties.id,name:f.properties.name};}}
+  return null;}
 function mobMapStyleFor(id){
   const cur=zidOf(area());
   if(MOB_MAP.sel&&id===MOB_MAP.sel.id)return MOB_MAP_STYLE.tap;
@@ -3856,7 +3872,7 @@ async function mobMapInit(){
     const p=area();
     const c=(p&&p.lat!=null)?[p.lat,p.lon]:[45.5,-117.5];
     MOB_MAP.m=L.map(host,{zoomControl:false,attributionControl:true}).setView(c,(p&&p.lat!=null)?8:6);
-    L.control.zoom({position:"bottomright"}).addTo(MOB_MAP.m);
+    L.control.zoom({position:"topright"}).addTo(MOB_MAP.m); /* v99: bottom-right is where the selection card lives */
     L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:15,attribution:"&copy; OpenStreetMap"}).addTo(MOB_MAP.m);
     const gj=await fwzLoadGeo();
     MOB_MAP.zones=L.geoJSON(gj,{
@@ -3867,6 +3883,13 @@ async function mobMapInit(){
         mobMapRestyle();mobMapSelUi();});}
     }).addTo(MOB_MAP.m);
     if(MOB_MAP.zones.bringToBack)MOB_MAP.zones.bringToBack();
+    /* v99: don't depend on the canvas renderer's per-feature hit testing — resolve the tap
+       geometrically against the same geojson. Works for polygons and multipolygons, and
+       gives the same answer wherever inside the outline you land. */
+    MOB_MAP.m.on("click",e=>{
+      const hit=mobZoneAt(e.latlng.lng,e.latlng.lat);
+      if(!hit)return;
+      MOB_MAP.sel=hit;mobMapRestyle();mobMapSelUi();});
     mobMapMarkStations();
     setTimeout(()=>{try{MOB_MAP.m.invalidateSize();}catch(e){}},80);
   }catch(e){
@@ -3876,7 +3899,7 @@ async function mobMapInit(){
 function mobMapSelUi(){
   const box=$("mobMapSel");if(!box)return;
   const s=MOB_MAP.sel;
-  if(!s){box.classList.remove("on");box.innerHTML="";return;}
+  if(!s){box.classList.remove("on");box.classList.remove("up");box.innerHTML="";return;}
   const isCur=zidOf(area())===s.id;
   box.innerHTML='<div style="display:flex;gap:10px;align-items:center;min-width:0">'
     +'<div style="min-width:0;flex:1"><div style="font:700 12.5px Figtree,sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'
@@ -3884,6 +3907,8 @@ function mobMapSelUi(){
     +'<div class="mnote" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+mobEsc(s.name||"")+'</div></div>'
     +'<button class="mbtn" id="mobMapGo">'+(isCur?"Reload":"Load zone")+'</button></div>';
   box.classList.add("on");
+  /* next frame so the transition actually runs instead of being collapsed into the paint */
+  (window.requestAnimationFrame||(f=>setTimeout(f,16)))(()=>{try{box.classList.add("up");}catch(e){}});
   const gb=$("mobMapGo");
   if(gb)gb.onclick=()=>{const id=s.id;MOB_MAP.sel=null;mobMapRestyle();mobMapSelUi();mobZoneGo(id);};}
 function renderMobMap(root){
