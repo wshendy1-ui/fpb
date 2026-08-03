@@ -314,6 +314,7 @@ body.mobOn{overflow:hidden}
 #mobRoot .mtxcell .cv{font:700 12px ui-monospace,Menlo,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 #mobRoot .mtxcell .cs{font:600 8.5px Figtree,sans-serif;opacity:.82;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 #mobRoot .mtxname{cursor:pointer}
+#mobRoot .mtxflag{display:inline-block;font:800 7.5px Figtree,sans-serif;letter-spacing:.05em;border:1px solid;border-radius:5px;padding:1px 4px;vertical-align:1px;white-space:nowrap}
 #mobRoot .mtxdesc{font-size:10.5px;line-height:1.5;color:var(--mlab);background:var(--mnt);border:1px solid var(--mline2);border-radius:10px;padding:8px 10px;margin:2px 0 5px}
 /* v93: uniform severity pills */
 #mobRoot .mchip,#mobSheetIn .schip{display:inline-block;text-align:center;min-width:46px;font:800 9px Figtree,sans-serif;letter-spacing:.04em;border-radius:8px;padding:4px 6px;white-space:nowrap}
@@ -777,7 +778,7 @@ const OM_MODELS_FULL=["gfs_seamless","ecmwf_ifs025","icon_seamless","gem_seamles
 const OM_MODELS_LEAN=["gfs_seamless","ecmwf_ifs025"];
 function omModels(){return state.ensMode==="full"?OM_MODELS_FULL:OM_MODELS_LEAN;}
 function ensembleLab(){return state.ensMode==="full"?((OM_MODELS_FULL.length+1)+" · full ensemble"):((OM_MODELS_LEAN.length+1)+" · lean (GFS+ECMWF+NWS)");}
-const APP_VERSION="93"; /* PWA — bump together with sw.js CACHE on every release */
+const APP_VERSION="95"; /* PWA — bump together with sw.js CACHE on every release */
 const MAX_RAWS=5; /* v84: station cap per area — API discipline; pickers rank active-first, then nearest */
 const PDS_RE=/particularly\s+dangerous\s+situation/i; /* v84: PDS wording inside a Red Flag Warning — display only */
 /* ==================== v86: narrative pools — driven by / held in check ==================== */
@@ -2127,8 +2128,25 @@ function parseRawsFeatures(rj){
     const nmk=Object.keys(a).find(k=>/station.?na|name/i.test(k));
     const stk=Object.keys(a).find(k=>/status/i.test(k));
     const geo=f.geometry||{};
-    found.push({id:String(a[idk]).trim(),name:nmk?String(a[nmk]).trim():"RAWS "+a[idk],
+    const nm=nmk?String(a[nmk]).trim():"RAWS "+a[idk];
+    /* v95: permanence. The RAWS layer's column for this varies by publisher, so read any
+       plausible one rather than hardcoding a single name, and fall back to the station
+       name (portables are usually labelled). Three-state on purpose:
+         true  = clearly portable/temporary   false = clearly permanent   null = unknown.
+       Unknown is NOT treated as portable — silently dropping stations because a layer
+       omits the column would be worse than including one portable. */
+    const tyk=Object.keys(a).find(k=>/portab|permanen|temporar|station.?type|^type$|category|class/i.test(k));
+    const tyv=tyk?String(a[tyk]):"";
+    const nameSig=/\b(portable|temp\.?|temporary|incident|mobile|trailer)\b/i.test(nm);
+    let temporary=null;
+    if(/portab|temporar|\btemp\b|mobile|incident/i.test(tyv))temporary=true;
+    else if(/permanen|fixed|standard/i.test(tyv))temporary=false;
+    else if(nameSig)temporary=true;
+    found.push({id:String(a[idk]).trim(),name:nm,
       lat:(typeof geo.y==="number")?geo.y:null,lon:(typeof geo.x==="number")?geo.x:null,
+      statusTxt:stk?String(a[stk]).trim():null,
+      typeTxt:tyk?tyv.trim():null,
+      temporary:temporary,
       inactive:stk?/inactive|discontinu|retired|out.?of.?service/i.test(String(a[stk])):false});}
   const seen={};const list=found.filter(s=>!seen[s.id]&&(seen[s.id]=1));
   list.sort((a,b)=>a.name.localeCompare(b.name));
@@ -2187,6 +2205,32 @@ function pointInRings(rings,pt){
   }
   return inside;
 }
+/* v94: first-touch station roster. A freshly resolved zone selects the RAWS that sit
+   INSIDE the zone polygon, active-first then nearest, capped at MAX_RAWS. Areas that
+   already carry a roster are never touched — per-zone curation is the whole point of
+   saving stations with the area, and a zone you have tuned stays tuned. Widen the
+   radius and pick manually from the map to override. */
+function autoPickInZone(cands,ar){
+  if(!ar||!Array.isArray(cands)||!cands.length)return null;
+  if((ar.stations||[]).some(s=>s.sel))return null;      /* curated roster wins, always */
+  /* v95: live stations only, and no portables — a temporary station moved in for an
+     incident should never quietly become a zone's fuels baseline. Unknown permanence
+     still qualifies (see parseRawsFeatures), so a layer without the column still works. */
+  const inZone=cands.filter(c=>c.inFdra);
+  const pool=inZone.filter(c=>!c.inactive&&c.temporary!==true);
+  if(!pool.length)return null;
+  const pick=pool.slice().sort(stnCapRank).slice(0,Math.min(AUTO_RAWS,MAX_RAWS));
+  const inC={};cands.forEach(c=>{inC[String(c.id)]=1;});
+  const keep=(ar.stations||[]).filter(x=>!inC[String(x.id)]);
+  ar.stations=keep.concat(pick.map(c=>({id:c.id,name:c.name,sel:true,
+    lat:c.lat!=null?c.lat:undefined,lon:c.lon!=null?c.lon:undefined})));
+  cands.forEach(c=>{c.checked=pick.indexOf(c)>=0;});
+  persist();
+  return {n:pick.length,inZone:inZone.length,eligible:pool.length,
+    skippedDead:inZone.filter(c=>c.inactive).length,
+    skippedTemp:inZone.filter(c=>c.temporary===true).length,
+    names:pick.map(c=>c.name)};
+}
 async function rawsCandidates(fd,lat,lon,radMi){
   const qURL=u=>{u=String(u||"").replace(/\/+$/,"");
     return /\/(Feature|Map)Server\/\d+$/i.test(u)?(u+"/query"):(u+"/0/query");};
@@ -2216,7 +2260,7 @@ async function rawsCandidates(fd,lat,lon,radMi){
   out.forEach(s=>{
     s.inFdra=(fd&&fd.rings&&s.lon!=null)?pointInRings(fd.rings,[s.lon,s.lat]):false;
     s.distMi=(s.lat!=null)?distMi(lat,lon,s.lat,s.lon):null;
-    s.checked=!!s.inFdra&&!s.inactive;
+    s.checked=!!s.inFdra&&!s.inactive&&s.temporary!==true;
   });
   out.sort((a,b)=>((b.inFdra?1:0)-(a.inFdra?1:0))||((a.distMi??1e9)-(b.distMi??1e9)));
   /* v84: cap the pre-selection — sorted in-zone-first then nearest, so the first MAX_RAWS checked are the best */
@@ -2378,6 +2422,10 @@ function fwzSyncTo(id){ /* after Resolve — mirror the resolved zone into the d
   if(FWZ_LAYER)FWZ_LAYER.setStyle(f=>fwzStyle(f.properties.id));
 }
 /* v84: MAX_RAWS enforcement — active stations first, then nearest to the point, when auto-truncating */
+/* v95: how many stations the FIRST automatic in-zone pick takes. Deliberately below
+   MAX_RAWS — three good in-zone RAWS make a tighter composite than five that reach to
+   the zone edge. Manual picking still goes to MAX_RAWS. */
+const AUTO_RAWS=3;
 function stnCapRank(a,b){return ((a.inactive?1:0)-(b.inactive?1:0))||((a.distMi??1e9)-(b.distMi??1e9));}
 function stnCapToast(){toast("Station cap: max "+MAX_RAWS+" per area — deselect one first");}
 /* Toggle a candidate station from any surface (marker, near-miss map click, list) */
@@ -2419,7 +2467,7 @@ function renderPtStnList(){
     +'<input type="checkbox" data-i="'+i+'"'+(c.checked?" checked":"")+'> '
     +esc(c.name)+' <span class="cid">'+esc(c.id)
     +(c.distMi!=null?(" · "+c.distMi.toFixed(1)+" mi"):"")
-    +(c.inFdra?" · in zone":"")+(c.inactive?" · inactive?":"")+"</span></label>").join("");
+    +(c.inFdra?" · in zone":"")+(c.inactive?" · inactive?":"")+(c.temporary===true?" · portable":"")+"</span></label>").join("");
   list.querySelectorAll("input").forEach(ch=>{ch.onchange=()=>{
     const c=cands[+ch.dataset.i];if(!c)return;
     if(ch.checked&&cands.filter(x=>x.checked).length>=MAX_RAWS){ch.checked=false;stnCapToast();return;}
@@ -2440,7 +2488,7 @@ function drawFdra(fd,lat,lon,radMi,cands){
     fillColor:s.checked?"#2f5d3a":"#ffffff",fillOpacity:s.checked?.95:.25});
   MAPL.stns=L.layerGroup(cands.filter(s=>s.lat!=null).map(s=>{
     const mk=L.circleMarker([s.lat,s.lon],stnStyle(s));
-    mk.bindTooltip(s.name+" ("+s.id+")"+(s.distMi!=null?(" · "+s.distMi.toFixed(1)+" mi"):"")+(s.inactive?" · inactive?":"")+" — click to select/deselect");
+    mk.bindTooltip(s.name+" ("+s.id+")"+(s.distMi!=null?(" · "+s.distMi.toFixed(1)+" mi"):"")+(s.inactive?" · inactive?":"")+(s.temporary===true?" · portable":"")+" — click to select/deselect");
     s._mkSync=()=>{if(mk.setStyle)mk.setStyle(stnStyle(s));};
     mk.on("click",e=>{
       window._stnClickAt=Date.now(); /* marker click must not move the forecast point */
@@ -3534,10 +3582,12 @@ const MOB_ADJ_S=["LOW","MOD","HIGH","V HIGH","EXT"];
 const MOB_ADJ_P=["LOW","MOD","HIGH","V H","EXT"];
 /* tier palette as rgb triples so mobile cells can carry the day color at reduced opacity */
 const MOB_RGB={0:"61,138,78",1:"61,118,178",2:"217,173,31",3:"221,122,34",4:"194,51,39"};
-const MOB_A_BRIEF=0.85,MOB_A_MATRIX=0.75;
+const MOB_A_BRIEF=0.65,MOB_A_MATRIX=0.55; /* v94: quieter in the field \u2014 the tier still reads, the screen stops shouting */
 function mobFill(lv,a){return lv==null?"var(--mnt)":"rgba("+MOB_RGB[lv]+","+a+")";}
 /* dark ink on the yellow tier, cream on the rest — the rule the 7-day strip already uses */
-function mobInk(lv){return lv==null?"var(--mlab)":(lv===2?"#4a3a04":"#fdf8ee");}
+function mobInk(lv){return lv==null?"var(--mlab)":(lv===2?"#4a3a04":"#fffdf8");}
+/* v94: pills stay full-strength so severity still pops against the quieter cells */
+function mobPillInk(lv){return lv==null?"var(--mlab)":(lv===2?"#4a3a04":"#fdf8ee");}
 /* short units for narrow mobile cells — the desktop matrix keeps the full strings */
 const MOB_UN={vi:"kt\u00d7kft",hdw:"hPa\u00b7m/s",tmax:"\u00b0F",rhmin:"%",rhrec:"%",wind:"mph",gust:"mph",precip:"in",pot:"%",cape:"J/kg"};
 const MOB_SHORT={erc:"ERC",bi:"Burning Index",ic:"IC",fm100:"100-hr FM",fm1000:"1000-hr FM",
@@ -3705,7 +3755,9 @@ function renderMob(){
       +'<span style="font:600 9px Figtree,sans-serif;letter-spacing:.05em;color:var(--mmut)">RAWS · FEMS</span></div>'
       +'<div class="mgrid" id="mobFuGrid">'+fu.join("")+'</div></div>';}
   /* footer: provenance + disclaimer */
-  h+='<div class="mfoot">Normals: '+(nrm?(nrm.src==="climo"?"FPB climatology "+mobEsc(nrm.span||"")+" at the zone point (means-only)":"calibrated "+mobEsc(nrm.at||""))
+  const stnN=((p&&p.stations)||[]).filter(s=>s.sel).length;
+  h+='<div class="mfoot">Stations: '+(stnN?(stnN+" RAWS selected for this zone (saved with the zone)"):"none yet \u2014 resolve the zone to auto-select its in-zone RAWS")+'. ';
+  h+='Normals: '+(nrm?(nrm.src==="climo"?"FPB climatology "+mobEsc(nrm.span||"")+" at the zone point (means-only)":"calibrated "+mobEsc(nrm.at||""))
     :"absolute defaults — Calibrate or visit a climo-covered zone")
     +'. Same engine, weights, and calibration as the desktop briefing. Verify against official products before operational decisions.</div>';
   root.innerHTML=h;
@@ -3795,10 +3847,30 @@ function renderMobMatrix(root){
       cells+='<button class="mtxcell" data-i="'+i+'" style="background:'+mobFill(lv,MOB_A_MATRIX)+';color:'+mobInk(lv)+'">'
         +'<span class="cv">'+(tx==null?'<span style="opacity:.35">\u2014</span>':mobEsc(tx))+'</span>'
         +(sub?'<span class="cs">'+mobEsc(sub)+'</span>':'')+'</button>';}
+    /* v94: flag which Haines variant the rating is actually using — the other stays for context */
+    let nmTag="";
+    if(r.id==="hainesH"||r.id==="hainesM"){
+      const ha=hainesApplicable();
+      const mine=(r.id==="hainesH")?"H":"M";
+      if(ha.v==null)nmTag=' <span class="mtxflag" style="border-color:var(--mline);color:var(--mmut)">ELEV PENDING</span>';
+      else if(ha.v===mine)nmTag=' <span class="mtxflag" style="background:var(--macc);border-color:var(--macc);color:#fdf8ee">IN RATING</span>';
+      else nmTag=' <span class="mtxflag" style="border-color:var(--mline);color:var(--mmut)">CONTEXT</span>';}
     h+='<div class="mrowg" style="--mc:'+idx.length+'"><div class="mtxname" data-desc-for="'+mobEsc(r.id)+'">'
-      +mobEsc(r.nm)+(r.desc?' <span style="opacity:.45">\u24d8</span>':'')+'</div>'+cells+'</div>'
+      +mobEsc(r.nm)+nmTag+(r.desc?' <span style="opacity:.45">\u24d8</span>':'')+'</div>'+cells+'</div>'
       +(r.desc?'<div class="mtxdesc" data-desc="'+mobEsc(r.id)+'" hidden>'+mobEsc(r.desc)+'</div>':'');}
-  h+='</div><div class="mfoot" style="margin-top:8px">Tap any cell for that day\u2019s full detail sheet. Severity tints use the same ladders, weights, and calibration as desktop.</div>';
+  /* v94: Haines provenance + the GEFS point plot at the nearest half degree, same as desktop */
+  const ha=hainesApplicable();
+  const hp=wxPointsSel(area())[0];
+  let foot='Tap any cell for that day\u2019s full detail sheet, or a row name for its definition. '
+    +'Haines in the rating: <b>'+(ha.v==null?"pending point elevation \u2014 both shown for context"
+      :(ha.v==="H"?"High (700/500 hPa)":"Mid (850/700 hPa)")
+        +(ha.elevM!=null?(" \u00b7 point elevation "+Math.round(ha.elevM*3.28084).toLocaleString()+" ft"):" \u00b7 set manually"))+'</b>. ';
+  if(hp&&hp.lat!=null&&hp.lon!=null){
+    const hl=(Math.round(hp.lat*2)/2).toFixed(1),ho=(Math.round(hp.lon*2)/2).toFixed(1);
+    const hu=(state.hdwUrl||HDW_PLOT_DEF).replace(/\{lat\}/g,hl).replace(/\{lon\}/g,ho);
+    foot+='<a href="'+mobEsc(hu)+'" target="_blank" rel="noopener" style="color:var(--maccd);font-weight:700">HDW GEFS plot at '+hl+', '+ho+' \u2197</a> (nearest \u00bd\u00b0).';
+  }else foot+='Resolve a point for the HDW GEFS plot link.';
+  h+='</div><div class="mfoot" style="margin-top:8px">'+foot+'</div>';
   root.innerHTML=h;mobMatWire(root);}
 function mobMatWire(root){
   root.querySelectorAll(".mseg button[data-r]").forEach(b=>b.onclick=()=>{MOB_MR.v=+b.dataset.r;renderMob();});
@@ -3821,7 +3893,7 @@ function mobSheetOpen(){
        and the row definitions live in the Matrix tab. */
     h+='<div class="srow" data-rid="'+mobEsc(r.id)+'" style="cursor:default"><div class="nm">'+mobEsc(r.nm)+'</div>'
       +'<div class="vl">'+mobEsc(cv.txt!=null?cv.txt:cv.v)+' '+mobEsc(mobUn(r))+'</div>'
-      +'<span class="schip" style="background:'+(lv==null?"var(--mnt)":mobFill(lv,1))+';color:'+mobInk(lv)+'">'+(lv==null?"\u2014":MOB_ADJ_P[lv])+'</span></div>';}
+      +'<span class="schip" style="background:'+(lv==null?"var(--mnt)":mobFill(lv,1))+';color:'+mobPillInk(lv)+'">'+(lv==null?"\u2014":MOB_ADJ_P[lv])+'</span></div>';}
   inn.innerHTML=h;sh.classList.add("on");
   $("mobSheetX").onclick=()=>sh.classList.remove("on");
   sh.onclick=e=>{if(e.target===sh)sh.classList.remove("on");};
@@ -4413,7 +4485,7 @@ function showStnDlg(list,code){
   $("stnList").innerHTML=list.map((s,i)=>{
     let chk=(s.checked!==undefined)?s.checked:!s.inactive;
     if(chk){nChk++;if(nChk>MAX_RAWS)chk=false;}
-    const extra=(s.distMi!=null?(" · "+s.distMi.toFixed(1)+" mi"):"")+(s.inFdra?" · in FDRA":"")+(s.inactive?" · inactive?":"");
+    const extra=(s.distMi!=null?(" · "+s.distMi.toFixed(1)+" mi"):"")+(s.inFdra?" · in FDRA":"")+(s.inactive?" · inactive?":"")+(s.temporary===true?" · portable":"");
     return '<label><input type="checkbox" data-i="'+i+'"'+(chk?" checked":"")+'> '+esc(s.name)+' <span class="cid">'+esc(s.id)+esc(extra)+"</span></label>";}).join("");
   $("stnList").querySelectorAll("input").forEach(c=>c.onchange=()=>{
     if(c.checked&&document.querySelectorAll("#stnList input:checked").length>MAX_RAWS){c.checked=false;stnCapToast();}});
@@ -4645,6 +4717,21 @@ function boot(){
             :("0 RAWS within "+rad+" mi — widen the radius and Resolve again, or add stations manually.")));
       $("ptCreateBtn").disabled=!cands.length;
       areaFromFdra(fd,lat,lon); /* Resolve opens or creates the area */
+      /* v94: brand-new zone -> take the in-zone RAWS automatically, then import FEMS */
+      try{
+        const auto=autoPickInZone(cands,area());
+        if(auto){
+          renderStations();aggregateFems();
+          const skips=[];
+          if(auto.skippedDead)skips.push(auto.skippedDead+" inactive");
+          if(auto.skippedTemp)skips.push(auto.skippedTemp+" portable");
+          toast(auto.n+" in-zone RAWS selected automatically ("+auto.names.join(", ")+")"
+            +(skips.length?(" \u00b7 skipped "+skips.join(" + ")):"")
+            +(auto.eligible>auto.n?(" \u00b7 "+(auto.eligible-auto.n)+" more in zone available"):"")
+            +" \u2014 importing FEMS. Widen the radius or pick from the map to change them.");
+          try{$("pullFemsBtn").onclick();}catch(eF){}
+        }
+      }catch(eA){console.warn("auto RAWS:",eA);}
       try{fwzSyncTo(fd.idHint);}catch(e){} /* v85: mirror the resolved zone into the dropdown + overlay highlight */
       try{maybeClimo(area());}catch(e){} /* v91: instant zone normals from FPB climatology when uncalibrated */
       refreshWx();              /* data first — failures pill AND toast */
