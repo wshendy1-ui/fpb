@@ -347,6 +347,16 @@ body.mobOn{overflow:hidden}
 #mobRoot .mbtn.ghost{background:none;color:var(--maccd)}
 #mobRoot .mfld{font-size:10px;letter-spacing:.06em;font-weight:700;color:var(--mlab);text-transform:uppercase;margin-bottom:4px}
 #mobRoot .mnote{font-size:10.5px;line-height:1.5;color:var(--mmut)}
+/* v98: map tab. The map itself is the one place pinch-zoom stays enabled. */
+#mobMapWrap{position:relative;border-radius:16px;overflow:hidden;border:1px solid var(--mline2);box-shadow:var(--mshc)}
+#mobMap{height:62vh;min-height:320px;background:#e9e2d2;touch-action:none}
+#mobMap .leaflet-control-attribution{font-size:8.5px}
+#mobMapBar{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-top:9px}
+#mobRoot .mmapchip{font:700 10.5px Figtree,sans-serif;border:1px solid var(--mline);border-radius:999px;padding:6px 11px;background:var(--msur);color:var(--mlab);cursor:pointer;touch-action:manipulation}
+#mobRoot .mmapchip.on{background:var(--macc);border-color:var(--macc);color:#fdf8ee}
+#mobMapSel{position:absolute;left:10px;right:10px;bottom:10px;background:rgba(253,248,238,.95);backdrop-filter:blur(10px);
+  border:1px solid var(--mline2);border-radius:14px;box-shadow:0 4px 16px rgba(90,60,20,.18);padding:10px 12px;display:none}
+#mobMapSel.on{display:block}
 
 </style>
 <link rel="stylesheet" href="leaflet/leaflet.css">
@@ -365,6 +375,7 @@ body.mobOn{overflow:hidden}
   <div id="mobTabs">
     <button id="mobTabBrief" class="on">Brief</button>
     <button id="mobTabMatrix">Matrix</button>
+    <button id="mobTabMap">Map</button>
     <button id="mobTabZones">Zones</button>
     <button id="mobTabFull" title="Switch to the full desktop dashboard">Full</button>
   </div>
@@ -798,7 +809,7 @@ const OM_MODELS_FULL=["gfs_seamless","ecmwf_ifs025","icon_seamless","gem_seamles
 const OM_MODELS_LEAN=["gfs_seamless","ecmwf_ifs025"];
 function omModels(){return state.ensMode==="full"?OM_MODELS_FULL:OM_MODELS_LEAN;}
 function ensembleLab(){return state.ensMode==="full"?((OM_MODELS_FULL.length+1)+" · full ensemble"):((OM_MODELS_LEAN.length+1)+" · lean (GFS+ECMWF+NWS)");}
-const APP_VERSION="97"; /* PWA — bump together with sw.js CACHE on every release */
+const APP_VERSION="98"; /* PWA — bump together with sw.js CACHE on every release */
 const MAX_RAWS=5; /* v84: station cap per area — API discipline; pickers rank active-first, then nearest */
 const PDS_RE=/particularly\s+dangerous\s+situation/i; /* v84: PDS wording inside a Red Flag Warning — display only */
 /* ==================== v86: narrative pools — driven by / held in check ==================== */
@@ -3684,15 +3695,21 @@ function mobCellHtml(r,i,withSub){
   const cv=r.val(i);if(cv.v==null&&cv.txt==null)return "";
   const lv=r.sev(i,cv.v);
   return mobCellRaw(mobName(r),cv.txt!=null?cv.txt:cv.v,mobUn(r),lv,withSub?cv.sub:null,withSub==="inline");}
-function mobTabsSync(){const b=$("mobTabBrief"),m=$("mobTabMatrix"),z=$("mobTabZones");
+function mobTabsSync(){const b=$("mobTabBrief"),m=$("mobTabMatrix"),z=$("mobTabZones"),mp=$("mobTabMap");
   if(b)b.classList.toggle("on",MOB_TAB.v==="brief");
   if(m)m.classList.toggle("on",MOB_TAB.v==="matrix");
-  if(z)z.classList.toggle("on",MOB_TAB.v==="zones");}
+  if(z)z.classList.toggle("on",MOB_TAB.v==="zones");
+  if(mp)mp.classList.toggle("on",MOB_TAB.v==="map");}
 function renderMob(){
   const root=$("mobScroll");if(!root)return;
   mobTabsSync();
+  /* v98: the map owns a real DOM node; when we navigate away the node is replaced by
+     innerHTML, so drop the Leaflet instance rather than leave it bound to a dead element */
+  if(MOB_TAB.v!=="map"&&MOB_MAP.m){try{MOB_MAP.m.remove();}catch(e){}
+    MOB_MAP.m=null;MOB_MAP.zones=null;MOB_MAP.stns=null;MOB_MAP.sel=null;}
   if(MOB_TAB.v==="matrix"){renderMobMatrix(root);return;}
   if(MOB_TAB.v==="zones"){renderMobZones(root);return;}
+  if(MOB_TAB.v==="map"){renderMobMap(root);return;}
   const p=area();const days=mobDays();const si=mobSel();const has=days.length>0;
   const d0=has?days[0]:null;const t0=d0?adjLevel(d0.score):null;
   /* header */
@@ -3800,6 +3817,103 @@ function renderMob(){
   const st=$("mobStrip");if(st)st.querySelectorAll("button[data-i]").forEach(b=>b.onclick=()=>{
     state.ui=state.ui||{};state.ui.selDay=+b.dataset.i;try{renderAll();}catch(e){renderMob();}});
 }
+/* v98: mobile map. A second Leaflet instance living in the mobile shell — the desktop
+   map keeps its own container and workflow untouched. Zone outlines come from the same
+   cached zones_west.geojson (fwzLoadGeo), so nothing is fetched twice. */
+const MOB_MAP={m:null,zones:null,stns:null,sel:null,err:null,tried:false};
+const MOB_MAP_STYLE={
+  base:{color:"#3f4a3a",weight:1.1,opacity:.85,fillColor:"#6b7a5a",fillOpacity:.06},
+  cur:{color:"#b04a20",weight:2.6,opacity:1,fillColor:"#b04a20",fillOpacity:.13},
+  tap:{color:"#8f4c1d",weight:3,opacity:1,fillColor:"#c67139",fillOpacity:.22}
+};
+function mobMapStyleFor(id){
+  const cur=zidOf(area());
+  if(MOB_MAP.sel&&id===MOB_MAP.sel.id)return MOB_MAP_STYLE.tap;
+  if(cur&&id===cur)return MOB_MAP_STYLE.cur;
+  return MOB_MAP_STYLE.base;}
+function mobMapRestyle(){
+  if(MOB_MAP.zones&&MOB_MAP.zones.setStyle)
+    try{MOB_MAP.zones.setStyle(f=>mobMapStyleFor(f.properties.id));}catch(e){}}
+function mobMapMarkStations(){
+  if(!MOB_MAP.m||typeof L==="undefined")return;
+  if(MOB_MAP.stns){try{MOB_MAP.m.removeLayer(MOB_MAP.stns);}catch(e){}MOB_MAP.stns=null;}
+  const p=area();if(!p)return;
+  const sel=(p.stations||[]).filter(s=>s.sel&&s.lat!=null&&s.lon!=null);
+  const pt=wxPointsSel(p)[0];
+  const g=L.layerGroup();
+  sel.forEach(s=>{
+    L.circleMarker([s.lat,s.lon],{radius:6,color:"#2f5d3a",weight:2,fillColor:"#7a8a5e",fillOpacity:.95})
+      .bindTooltip(s.name+" ("+s.id+")",{direction:"top"}).addTo(g);});
+  if(pt&&pt.lat!=null)
+    L.circleMarker([pt.lat,pt.lon],{radius:5,color:"#b04a20",weight:3,fillColor:"#fdf8ee",fillOpacity:1})
+      .bindTooltip("Forecast point",{direction:"top"}).addTo(g);
+  g.addTo(MOB_MAP.m);MOB_MAP.stns=g;}
+async function mobMapInit(){
+  const host=$("mobMap");
+  if(!host||typeof L==="undefined"){MOB_MAP.err="Map library unavailable offline \u2014 use the Zones tab to search and resolve.";renderMob();return;}
+  if(MOB_MAP.m){setTimeout(()=>{try{MOB_MAP.m.invalidateSize();}catch(e){}},60);return;}
+  try{
+    const p=area();
+    const c=(p&&p.lat!=null)?[p.lat,p.lon]:[45.5,-117.5];
+    MOB_MAP.m=L.map(host,{zoomControl:false,attributionControl:true}).setView(c,(p&&p.lat!=null)?8:6);
+    L.control.zoom({position:"bottomright"}).addTo(MOB_MAP.m);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:15,attribution:"&copy; OpenStreetMap"}).addTo(MOB_MAP.m);
+    const gj=await fwzLoadGeo();
+    MOB_MAP.zones=L.geoJSON(gj,{
+      renderer:L.canvas({padding:.3}),
+      style:f=>mobMapStyleFor(f.properties.id),
+      onEachFeature:(f,ly)=>{ly.on("click",()=>{
+        MOB_MAP.sel={id:f.properties.id,name:f.properties.name};
+        mobMapRestyle();mobMapSelUi();});}
+    }).addTo(MOB_MAP.m);
+    if(MOB_MAP.zones.bringToBack)MOB_MAP.zones.bringToBack();
+    mobMapMarkStations();
+    setTimeout(()=>{try{MOB_MAP.m.invalidateSize();}catch(e){}},80);
+  }catch(e){
+    MOB_MAP.err="Zone layer unavailable: "+String(e&&e.message||e);
+    if(MOB_MAP.m){try{MOB_MAP.m.remove();}catch(e2){}MOB_MAP.m=null;MOB_MAP.zones=null;MOB_MAP.stns=null;}
+    renderMob();}}
+function mobMapSelUi(){
+  const box=$("mobMapSel");if(!box)return;
+  const s=MOB_MAP.sel;
+  if(!s){box.classList.remove("on");box.innerHTML="";return;}
+  const isCur=zidOf(area())===s.id;
+  box.innerHTML='<div style="display:flex;gap:10px;align-items:center;min-width:0">'
+    +'<div style="min-width:0;flex:1"><div style="font:700 12.5px Figtree,sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'
+    +mobEsc(s.id)+(isCur?' <span style="font:800 8px Figtree,sans-serif;color:var(--maccd);letter-spacing:.06em">CURRENT</span>':'')+'</div>'
+    +'<div class="mnote" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+mobEsc(s.name||"")+'</div></div>'
+    +'<button class="mbtn" id="mobMapGo">'+(isCur?"Reload":"Load zone")+'</button></div>';
+  box.classList.add("on");
+  const gb=$("mobMapGo");
+  if(gb)gb.onclick=()=>{const id=s.id;MOB_MAP.sel=null;mobMapRestyle();mobMapSelUi();mobZoneGo(id);};}
+function renderMobMap(root){
+  let h='<div style="padding:6px 2px 2px">'
+    +'<div class="mzone" style="font-size:21px">Map</div>'
+    +'<div class="mnote" style="margin-top:2px">Tap a zone outline to select it, then load it \u2014 stations, calibration and normals follow.</div></div>';
+  if(MOB_MAP.err){
+    h+='<div class="mcard"><div class="mnote" style="color:#a13c1c">'+mobEsc(MOB_MAP.err)+'</div></div>';
+    root.innerHTML=h;return;}
+  h+='<div id="mobMapWrap"><div id="mobMap"></div><div id="mobMapSel"></div></div>'
+    +'<div id="mobMapBar">'
+    +'<button class="mmapchip" id="mobMapHome">Center on zone</button>'
+    +'<button class="mmapchip" id="mobMapFit">Fit zone</button>'
+    +'<span class="mnote" style="flex:1;min-width:120px">Pinch to zoom the map \u2014 the rest of the app stays fixed.</span></div>';
+  root.innerHTML=h;
+  mobMapInit();
+  mobMapSelUi();
+  const hb=$("mobMapHome");
+  if(hb)hb.onclick=()=>{const p=area();
+    if(MOB_MAP.m&&p&&p.lat!=null)MOB_MAP.m.setView([p.lat,p.lon],9);
+    else toast("Resolve a zone first");};
+  const fb=$("mobMapFit");
+  if(fb)fb.onclick=()=>{
+    const cur=zidOf(area());
+    if(!MOB_MAP.m||!MOB_MAP.zones||!cur){toast("Resolve a zone first");return;}
+    let done=false;
+    try{MOB_MAP.zones.eachLayer(ly=>{
+      if(!done&&ly.feature&&ly.feature.properties&&ly.feature.properties.id===cur&&ly.getBounds){
+        MOB_MAP.m.fitBounds(ly.getBounds().pad(0.12));done=true;}});}catch(e){}
+    if(!done)toast("Zone outline not in the layer");};}
 /* v96: current-zone setup & calibration. Everything here writes the same state the
    desktop writes; the HDW fit calls the desktop's own usfsFitApply so one ladder math
    serves both surfaces. */
@@ -3874,6 +3988,7 @@ function mobStnApply(){
   try{renderStations();aggregateFems();}catch(e){}
   $("mobSheet").classList.remove("on");
   renderMob();
+  try{mobMapMarkStations();}catch(e){}
   toast(picked.length+" station"+(picked.length===1?"":"s")+" saved for this zone \u2014 importing FEMS\u2026");
   try{$("pullFemsBtn").onclick();}catch(e){}}
 function mobStnSheet(){
@@ -5047,6 +5162,7 @@ function boot(){
   const tb=$("mobTabBrief");if(tb)tb.onclick=()=>{MOB_TAB.v="brief";renderMob();};
   const tm=$("mobTabMatrix");if(tm)tm.onclick=()=>{MOB_TAB.v="matrix";renderMob();};
   const tz=$("mobTabZones");if(tz)tz.onclick=()=>{MOB_TAB.v="zones";renderMob();};
+  const tmp=$("mobTabMap");if(tmp)tmp.onclick=()=>{MOB_TAB.v="map";renderMob();};
   applyMode();try{maybeClimo(area());}catch(e){}
   if(state.autoFetch&&area()&&area().lat!=null)runFetchAll(false); /* nothing to fetch until a point is resolved */
 }
