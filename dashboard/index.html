@@ -291,6 +291,24 @@ body.mobOn #mobRoot{display:flex}
 #mobSheetIn .sgrp{font-size:9.5px;letter-spacing:.14em;font-weight:800;color:var(--mmut);text-transform:uppercase;padding:12px 0 4px}
 #mobAlert{border-radius:14px;padding:10px 13px;display:flex;gap:10px;align-items:center;box-shadow:var(--mshc)}
 #mobRoot .mfoot{font-size:10px;color:var(--mmut);line-height:1.5;padding:0 4px 6px}
+/* v92: hard horizontal lock — the shell never pans sideways */
+body.mobOn{overflow:hidden}
+#mobRoot,#mobScroll{overflow-x:hidden;overscroll-behavior-x:none;max-width:100vw}
+#mobStrip button{min-width:0}
+#mobRoot .mgrid>*{min-width:0}
+/* v92: mobile matrix */
+#mobRoot .mseg{display:flex;gap:6px;margin-top:9px}
+#mobRoot .mseg button{flex:1;border:1px solid var(--mline);border-radius:999px;padding:8px 4px;background:none;font:700 11.5px Figtree,sans-serif;color:var(--mlab);cursor:pointer}
+#mobRoot .mseg button.on{background:#201e1d;border-color:#201e1d;color:#fdf8ee}
+#mobRoot .mrowg{display:grid;grid-template-columns:104px repeat(var(--mc,4),1fr);gap:3px;align-items:stretch;min-width:0}
+#mobRoot .mtxhead{position:sticky;top:0;z-index:5;background:var(--mbg);padding:8px 0 5px}
+#mobRoot .mtxday{text-align:center;min-width:0}
+#mobRoot .mtxday .cap{display:block;height:3px;border-radius:2px;margin:0 5px 3px}
+#mobRoot .mtxday b{display:block;font-size:9.5px;letter-spacing:.04em}
+#mobRoot .mtxday i{font-style:normal;font-size:8.5px;color:var(--mmut)}
+#mobRoot .mtxgrp{font-size:9.5px;letter-spacing:.14em;font-weight:800;color:var(--mmut);text-transform:uppercase;padding:12px 2px 4px}
+#mobRoot .mtxname{font-size:9.5px;font-weight:600;color:var(--mlab);line-height:1.15;padding:5px 3px 5px 1px;display:flex;align-items:center;min-width:0;overflow:hidden}
+#mobRoot .mtxcell{border:none;border-radius:8px;font:600 10.5px ui-monospace,Menlo,monospace;padding:7px 2px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;color:#201e1d}
 
 </style>
 <link rel="stylesheet" href="leaflet/leaflet.css">
@@ -308,6 +326,7 @@ body.mobOn #mobRoot{display:flex}
   <div id="mobSheet"><div id="mobSheetIn"></div></div>
   <div id="mobTabs">
     <button id="mobTabBrief" class="on">Brief</button>
+    <button id="mobTabMatrix">Matrix</button>
     <button id="mobTabFull" title="Switch to the full desktop dashboard">Full</button>
   </div>
 </div>
@@ -740,7 +759,7 @@ const OM_MODELS_FULL=["gfs_seamless","ecmwf_ifs025","icon_seamless","gem_seamles
 const OM_MODELS_LEAN=["gfs_seamless","ecmwf_ifs025"];
 function omModels(){return state.ensMode==="full"?OM_MODELS_FULL:OM_MODELS_LEAN;}
 function ensembleLab(){return state.ensMode==="full"?((OM_MODELS_FULL.length+1)+" · full ensemble"):((OM_MODELS_LEAN.length+1)+" · lean (GFS+ECMWF+NWS)");}
-const APP_VERSION="91"; /* PWA — bump together with sw.js CACHE on every release */
+const APP_VERSION="92"; /* PWA — bump together with sw.js CACHE on every release */
 const MAX_RAWS=5; /* v84: station cap per area — API discipline; pickers rank active-first, then nearest */
 const PDS_RE=/particularly\s+dangerous\s+situation/i; /* v84: PDS wording inside a Red Flag Warning — display only */
 /* ==================== v86: narrative pools — driven by / held in check ==================== */
@@ -3487,6 +3506,21 @@ setInterval(renderDataAge,5*60*1000); /* keep the age honest while the tab sits 
 /* ===================== v91 MOBILE MODE + FPB CLIMO AUTO-NORMALS ===================== */
 const MOB_BP=700;let MOB_MQ=null,MOB_BUSY=false;const CLIMO_TRIED={};
 const CLIMO_URLS=[z=>"../climo/"+z+".json",z=>"https://raw.githubusercontent.com/wshendy1-ui/fpb/main/climo/"+z+".json"];
+/* v92: Brief shows a fixed, curated set; everything else lives in the Matrix tab */
+const MOB_WX_IDS=["tmax","rhmin","rhrec","wind","gust","precip","pop","dryltg"];
+const MOB_FU_IDS=["erc","bi","fm100","fm1000"];
+/* v92: narrow-cell labels — the Matrix and the detail sheet still carry the full row names */
+const MOB_SHORT={erc:"ERC",bi:"Burning Index",ic:"IC",fm100:"100-hr FM",fm1000:"1000-hr FM",
+  lfm:"Live herb FM",lfw:"Live woody FM",tmax:"Max temp",rhmin:"Min RH",rhrec:"RH recovery",
+  wind:"Wind",gust:"Gusts",precip:"Precip",dryltg:"Dry lightning",kbdi:"KBDI"};
+function mobName(r){return MOB_SHORT[r.id]||r.nm.split("(")[0].trim();}
+const MOB_TAB={v:"brief"};const MOB_MR={v:0};
+function rowById(id){for(const r of ROWS){if(!r.grp&&r.id===id)return r;}return null;}
+function rowUn(r){const u=typeof r.un==="function"?r.un():r.un;return u||"";}
+/* "p93" reads like code in the field — say "93rd %ile" (leaves "manual", band text, everything else alone) */
+function ordPct(s){if(s==null)return s;return String(s).replace(/\bp(\d{1,3})\b/g,function(m,d){
+  const x=+d,t=x%10,h=x%100;const o=(h>=11&&h<=13)?"th":t===1?"st":t===2?"nd":t===3?"rd":"th";
+  return x+o+" %ile";});}
 function mobAuto(){try{if(!MOB_MQ&&window.matchMedia){MOB_MQ=window.matchMedia("(max-width:"+MOB_BP+"px)");
   const h=()=>applyMode();if(MOB_MQ.addEventListener)MOB_MQ.addEventListener("change",h);else if(MOB_MQ.addListener)MOB_MQ.addListener(h);}
   return MOB_MQ?!!MOB_MQ.matches:false;}catch(e){return false;}}
@@ -3525,16 +3559,24 @@ function mobTint(lv){return lv==null?"var(--mnt)":"var(--m"+lv+"t)";}
 function mobDays(){return fx.days&&fx.days.length?fx.days.map((_,i)=>scoreDay(i)):[];}
 function mobSel(){const n=(fx.days||[]).length;if(!n)return 0;
   const s=(state.ui&&state.ui.selDay)||0;return Math.max(0,Math.min(s,n-1));}
+function mobCellRaw(nm,txt,un,lv,sub){
+  const empty=txt==null;
+  return '<div class="mcell" style="background:'+(empty?"var(--mnt)":mobTint(lv))+'">'
+    +'<div style="min-width:0;flex:1"><div class="nm">'+mobEsc(nm)+'</div>'
+    +'<div class="vl">'+(empty?'<span style="opacity:.35">\u2014</span>':mobEsc(txt)+' <span class="un">'+mobEsc(un)+'</span>')+'</div>'
+    +(sub?'<div class="sb">'+mobEsc(ordPct(sub))+'</div>':'')
+    +'</div><span class="mdot" style="background:'+(empty?"#c9bda6":mobLv(lv))+'"></span></div>';}
 function mobCellHtml(r,i,withSub){
   const cv=r.val(i);if(cv.v==null&&cv.txt==null)return "";
   const lv=r.sev(i,cv.v);
-  return '<div class="mcell" style="background:'+mobTint(lv)+'">'
-    +'<div style="min-width:0;flex:1"><div class="nm">'+mobEsc(r.nm.split("(")[0].trim())+'</div>'
-    +'<div class="vl">'+mobEsc(cv.txt!=null?cv.txt:cv.v)+' <span class="un">'+mobEsc(r.un||"")+'</span></div>'
-    +(withSub&&cv.sub?'<div class="sb">'+mobEsc(cv.sub)+'</div>':'')
-    +'</div><span class="mdot" style="background:'+mobLv(lv)+'"></span></div>';}
+  return mobCellRaw(mobName(r),cv.txt!=null?cv.txt:cv.v,rowUn(r),lv,withSub?cv.sub:null);}
+function mobTabsSync(){const b=$("mobTabBrief"),m=$("mobTabMatrix");
+  if(b)b.classList.toggle("on",MOB_TAB.v==="brief");
+  if(m)m.classList.toggle("on",MOB_TAB.v==="matrix");}
 function renderMob(){
   const root=$("mobScroll");if(!root)return;
+  mobTabsSync();
+  if(MOB_TAB.v==="matrix"){renderMobMatrix(root);return;}
   const p=area();const days=mobDays();const si=mobSel();const has=days.length>0;
   const d0=has?days[0]:null;const t0=d0?adjLevel(d0.score):null;
   /* header */
@@ -3598,7 +3640,7 @@ function renderMob(){
     h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px">';
     for(const[lab,idxs]of bk){const hs=horizonScore(idxs,days);const lv=adjLevel(hs);
       const why=horizonDrivers(idxs,days)[0]||(horizonModerators(idxs,days)[0]?"held by "+horizonModerators(idxs,days)[0]:"—");
-      h+='<div style="border:1px solid var(--mline2);border-radius:12px;padding:8px 10px;background:var(--mnt)">'
+      h+='<div style="border:1px solid var(--mline2);border-radius:12px;padding:8px 10px;background:var(--mnt);min-width:0;overflow:hidden">'
         +'<div style="font-size:9px;letter-spacing:.14em;font-weight:700;color:var(--mmut)">'+lab+'</div>'
         +'<div style="font-size:14px;font-weight:800;color:'+(lv==null?"var(--mmut)":mobLv(lv))+';margin-top:2px">'+(lv==null?"—":ADJ[lv])+'</div>'
         +'<div style="font-size:10.5px;color:var(--mmut);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+mobEsc(why)+'</div></div>';}
@@ -3606,17 +3648,28 @@ function renderMob(){
   h+='</div>';
   /* selected-day weather + fuels (engine buckets: w = weather rows, f = fuels rows) */
   if(has){
-    const wx=[],fu=[];
-    for(const r of ROWS){if(r.grp)continue;const b=bucketOf(r.id);
-      const cell=mobCellHtml(r,si,b==="f");if(!cell)continue;(b==="f"?fu:wx).push(cell);}
+    /* v92: fixed 4x2 weather box — the full row set lives in the Matrix tab */
+    const wx=[];
+    for(const id of MOB_WX_IDS){
+      if(id==="pop"){const pv=dd(si).pop;
+        wx.push(mobCellRaw("PoP",pv==null?null:String(Math.round(pv)),"%",null,null));continue;}
+      const r=rowById(id);if(!r){wx.push(mobCellRaw(id,null,"",null,null));continue;}
+      const cv=r.val(si);let tx=cv.txt!=null?cv.txt:cv.v;const lv=r.sev(si,cv.v);
+      if(id==="wind"&&tx!=null){const wr=rowById("wdir");const wv=wr?wr.val(si):null;
+        if(wv&&wv.txt)tx=String(wv.txt).split(" ")[0]+" "+tx;} /* "NW 18" — direction folded in */
+      wx.push(mobCellRaw(mobName(r),tx==null?null:String(tx),rowUn(r),lv,null));}
     h+='<div class="mcard"><div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:9px">'
       +'<div class="mkick">Day weather — '+mobEsc(dayLabel(si).dn+" "+dayLabel(si).dd)+'</div>'
       +'<button id="mobDetail" style="border:none;background:none;font:700 11px Figtree,sans-serif;color:var(--maccd);cursor:pointer;padding:2px 4px">Full detail ›</button></div>'
-      +'<div class="mgrid">'+(wx.join("")||'<div style="font-size:11px;color:var(--mmut)">no weather rows</div>')+'</div></div>';
+      +'<div class="mgrid" id="mobWxGrid">'+wx.join("")+'</div></div>';
+    /* v92: fixed 2x2 fuels box */
+    const fu=[];
+    for(const id of MOB_FU_IDS){const r=rowById(id);if(!r){fu.push(mobCellRaw(id,null,"",null,null));continue;}
+      const cell=mobCellHtml(r,si,true);fu.push(cell||mobCellRaw(mobName(r),null,rowUn(r),null,null));}
     h+='<div class="mcard"><div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:9px">'
       +'<div class="mkick">Fuels &amp; NFDRS — FM '+mobEsc((p&&p.fuelModel)||"Y")+'</div>'
       +'<span style="font:600 9px Figtree,sans-serif;letter-spacing:.05em;color:var(--mmut)">RAWS · FEMS</span></div>'
-      +'<div class="mgrid">'+(fu.join("")||'<div style="font-size:11px;color:var(--mmut)">No FEMS data yet — import runs with Fetch once stations are selected.</div>')+'</div></div>';}
+      +'<div class="mgrid" id="mobFuGrid">'+fu.join("")+'</div></div>';}
   /* footer: provenance + disclaimer */
   h+='<div class="mfoot">Normals: '+(nrm?(nrm.src==="climo"?"FPB climatology "+mobEsc(nrm.span||"")+" at the zone point (means-only)":"calibrated "+mobEsc(nrm.at||""))
     :"absolute defaults — Calibrate or visit a climo-covered zone")
@@ -3629,6 +3682,35 @@ function renderMob(){
   const st=$("mobStrip");if(st)st.querySelectorAll("button[data-i]").forEach(b=>b.onclick=()=>{
     state.ui=state.ui||{};state.ui.selDay=+b.dataset.i;try{renderAll();}catch(e){renderMob();}});
 }
+/* v92: mobile Matrix — every dashboard row, Days 1–4 / 5–7 pages, zero horizontal scroll */
+function renderMobMatrix(root){
+  const days=mobDays();const all=(fx.days||[]).length;
+  const idx=(MOB_MR.v===0?[0,1,2,3]:[4,5,6]).filter(i=>i<all);
+  let h='<div style="padding:6px 2px 2px">'
+    +'<div style="font-size:9.5px;letter-spacing:.22em;font-weight:700;color:var(--mmut);text-transform:uppercase">Full matrix — same rows as desktop</div>'
+    +'<div class="mzone" style="font-size:21px">'+mobEsc((area()&&area().name)||"No area")+'</div>'
+    +'<div class="mseg"><button data-r="0"'+(MOB_MR.v===0?' class="on"':'')+'>Days 1\u20134</button>'
+    +'<button data-r="1"'+(MOB_MR.v===1?' class="on"':'')+'>Days 5\u20137</button></div></div>';
+  if(!idx.length){
+    root.innerHTML=h+'<div class="mcard" style="font-size:12px;color:var(--mlab)">No forecast loaded yet \u2014 fetch from the Brief tab.</div>';
+    mobMatWire(root);return;}
+  h+='<div style="--mc:'+idx.length+'">';
+  h+='<div class="mtxhead mrowg" style="--mc:'+idx.length+'"><div></div>'+idx.map(i=>{
+    const L=dayLabel(i);const lv=days[i]?adjLevel(days[i].score):null;
+    return '<div class="mtxday"><span class="cap" style="background:'+mobLv(lv)+'"></span><b>'+mobEsc(L.dn)+'</b><i>'+mobEsc(L.dd)+'</i></div>';}).join("")+'</div>';
+  for(const r of ROWS){
+    if(r.grp){h+='<div class="mtxgrp">'+mobEsc(r.grp)+'</div>';continue;}
+    let cells="";
+    for(const i of idx){const cv=r.val(i);const lv=r.sev(i,cv.v);const tx=cv.txt!=null?cv.txt:cv.v;
+      cells+='<button class="mtxcell" data-i="'+i+'" style="background:'+mobTint(lv)+'"'
+        +(lv!=null?'':' ')+'>'+(tx==null?'<span style="opacity:.35">\u2014</span>':mobEsc(tx))+'</button>';}
+    h+='<div class="mrowg" style="--mc:'+idx.length+'"><div class="mtxname">'+mobEsc(r.nm)+'</div>'+cells+'</div>';}
+  h+='</div><div class="mfoot" style="margin-top:8px">Tap any cell for that day\u2019s full detail sheet. Severity tints use the same ladders, weights, and calibration as desktop.</div>';
+  root.innerHTML=h;mobMatWire(root);}
+function mobMatWire(root){
+  root.querySelectorAll(".mseg button[data-r]").forEach(b=>b.onclick=()=>{MOB_MR.v=+b.dataset.r;renderMob();});
+  root.querySelectorAll(".mtxcell[data-i]").forEach(b=>b.onclick=()=>{
+    state.ui=state.ui||{};state.ui.selDay=+b.dataset.i;mobSheetOpen();});}
 function mobSheetOpen(){
   const sh=$("mobSheet"),inn=$("mobSheetIn");if(!sh||!inn)return;
   const si=mobSel();const days=mobDays();const lv0=days[si]?adjLevel(days[si].score):null;
@@ -3641,7 +3723,7 @@ function mobSheetOpen(){
     const cv=r.val(si);if(cv.v==null&&cv.txt==null)continue;
     const lv=r.sev(si,cv.v);
     h+='<div class="srow" data-rid="'+mobEsc(r.id)+'"><div class="nm">'+mobEsc(r.nm)+'</div>'
-      +'<div class="vl">'+mobEsc(cv.txt!=null?cv.txt:cv.v)+' '+mobEsc(r.un||"")+(cv.sub?' <span style="color:var(--mmut);font-weight:400">· '+mobEsc(cv.sub)+'</span>':'')+'</div>'
+      +'<div class="vl">'+mobEsc(cv.txt!=null?cv.txt:cv.v)+' '+mobEsc(rowUn(r))+(cv.sub?' <span style="color:var(--mmut);font-weight:400">· '+mobEsc(ordPct(cv.sub))+'</span>':'')+'</div>'
       +'<span class="schip" style="background:'+mobTint(lv)+';color:'+(lv==null?"var(--mmut)":(lv===2?"var(--m2ink)":mobLv(lv)))+'">'+(lv==null?"—":ADJ[lv])+'</span></div>'
       +(r.desc?'<div class="sdesc" data-desc="'+mobEsc(r.id)+'" hidden>'+mobEsc(r.desc)+'</div>':'');}
   inn.innerHTML=h;sh.classList.add("on");
@@ -4609,6 +4691,8 @@ function boot(){
   /* v91: mobile mode + toggles + climo auto-normals for the loaded area */
   const mb=$("mobBtn");if(mb)mb.onclick=()=>{state.uiMode="mobile";persist();applyMode();};
   const tf=$("mobTabFull");if(tf)tf.onclick=()=>{state.uiMode="desktop";persist();applyMode();};
+  const tb=$("mobTabBrief");if(tb)tb.onclick=()=>{MOB_TAB.v="brief";renderMob();};
+  const tm=$("mobTabMatrix");if(tm)tm.onclick=()=>{MOB_TAB.v="matrix";renderMob();};
   applyMode();try{maybeClimo(area());}catch(e){}
   if(state.autoFetch&&area()&&area().lat!=null)runFetchAll(false); /* nothing to fetch until a point is resolved */
 }
