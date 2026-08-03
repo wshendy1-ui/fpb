@@ -327,6 +327,16 @@ body.mobOn{overflow:hidden}
 #mobRoot .mzpin{flex:none;border:none;background:none;font-size:14px;line-height:1;padding:6px;cursor:pointer;color:var(--macc)}
 #mobRoot .mzsearch,#mobRoot .mzstate{width:100%;border:1px solid var(--mline);border-radius:12px;padding:10px 12px;font:600 12.5px Figtree,sans-serif;background:var(--msur);color:inherit;-webkit-appearance:none}
 #mobRoot .mzwin{display:flex;flex-direction:column;gap:7px;max-height:430px;overflow-y:auto;overscroll-behavior-y:contain;padding-right:2px}
+/* v96: setup & calibration panel */
+#mobRoot .mstn{display:flex;gap:9px;align-items:center;border:1px solid var(--mline2);border-radius:11px;padding:8px 10px;min-width:0}
+#mobRoot .mstn .sn{font-size:11.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#mobRoot .mstn .sm{font:600 9.5px ui-monospace,Menlo,monospace;color:var(--mmut);white-space:nowrap}
+#mobRoot .mtagx{display:inline-block;font:800 7.5px Figtree,sans-serif;letter-spacing:.05em;border:1px solid var(--mline);border-radius:5px;padding:1px 4px;color:var(--mmut);white-space:nowrap}
+#mobRoot .mnum{width:100%;border:1px solid var(--mline);border-radius:11px;padding:9px 11px;font:700 13px ui-monospace,Menlo,monospace;background:var(--msur);color:inherit;-webkit-appearance:none}
+#mobRoot .mbtn{border:1px solid var(--macc);background:var(--macc);color:#fdf8ee;border-radius:12px;padding:10px 14px;font:700 12px Figtree,sans-serif;cursor:pointer}
+#mobRoot .mbtn.ghost{background:none;color:var(--maccd)}
+#mobRoot .mfld{font-size:10px;letter-spacing:.06em;font-weight:700;color:var(--mlab);text-transform:uppercase;margin-bottom:4px}
+#mobRoot .mnote{font-size:10.5px;line-height:1.5;color:var(--mmut)}
 
 </style>
 <link rel="stylesheet" href="leaflet/leaflet.css">
@@ -778,7 +788,7 @@ const OM_MODELS_FULL=["gfs_seamless","ecmwf_ifs025","icon_seamless","gem_seamles
 const OM_MODELS_LEAN=["gfs_seamless","ecmwf_ifs025"];
 function omModels(){return state.ensMode==="full"?OM_MODELS_FULL:OM_MODELS_LEAN;}
 function ensembleLab(){return state.ensMode==="full"?((OM_MODELS_FULL.length+1)+" · full ensemble"):((OM_MODELS_LEAN.length+1)+" · lean (GFS+ECMWF+NWS)");}
-const APP_VERSION="95"; /* PWA — bump together with sw.js CACHE on every release */
+const APP_VERSION="96"; /* PWA — bump together with sw.js CACHE on every release */
 const MAX_RAWS=5; /* v84: station cap per area — API discipline; pickers rank active-first, then nearest */
 const PDS_RE=/particularly\s+dangerous\s+situation/i; /* v84: PDS wording inside a Red Flag Warning — display only */
 /* ==================== v86: narrative pools — driven by / held in check ==================== */
@@ -3768,6 +3778,116 @@ function renderMob(){
   const st=$("mobStrip");if(st)st.querySelectorAll("button[data-i]").forEach(b=>b.onclick=()=>{
     state.ui=state.ui||{};state.ui.selDay=+b.dataset.i;try{renderAll();}catch(e){renderMob();}});
 }
+/* v96: current-zone setup & calibration. Everything here writes the same state the
+   desktop writes; the HDW fit calls the desktop's own usfsFitApply so one ladder math
+   serves both surfaces. */
+const MOB_STN={rad:25,cands:null,busy:false,err:null};
+function mobStnRow(s,extra){
+  return '<div class="mstn"><div style="min-width:0;flex:1">'
+    +'<div class="sn">'+mobEsc(s.name||("RAWS "+s.id))+'</div>'
+    +'<div class="sm">'+mobEsc(s.id)+(s.distMi!=null?(" \u00b7 "+s.distMi.toFixed(1)+" mi"):"")+'</div></div>'
+    +(s.inFdra?'<span class="mtagx">IN ZONE</span>':'')
+    +(s.inactive?'<span class="mtagx">INACTIVE</span>':'')
+    +(s.temporary===true?'<span class="mtagx">PORTABLE</span>':'')
+    +(extra||"")+'</div>';}
+function mobSetupHtml(p){
+  const sel=((p&&p.stations)||[]).filter(s=>s.sel);
+  const hc=p&&p.hdwClimo;const uA=(hc&&hc.form==="usfs"&&hc.anchors)||{};
+  const N=p&&p.wxNormals;
+  let h='<div class="mcard"><div class="mkick" style="margin-bottom:9px">Stations for this zone</div>';
+  h+=sel.length?('<div style="display:flex;flex-direction:column;gap:6px">'
+      +sel.map(s=>mobStnRow(s,"")).join("")+'</div>')
+    :'<div class="mnote">No stations selected yet \u2014 resolve the zone and the nearest '
+      +'three live, permanent in-zone RAWS are taken automatically.</div>';
+  h+='<div style="display:flex;gap:8px;margin-top:10px;align-items:center">'
+    +'<button class="mbtn ghost" id="mobStnBtn">Change stations</button>'
+    +'<span class="mnote" style="flex:1">Saved with this zone \u2014 pinned zones keep their own rosters.</span></div></div>';
+  /* HDW anchors */
+  h+='<div class="mcard"><div class="mkick" style="margin-bottom:4px">HDW percentiles</div>'
+    +'<div class="mnote" style="margin-bottom:9px">Read the two anchors off the GEFS plot for this point, then enter them here. '
+    +'The ladder seeds T1\u2013T4 at p50/p75/p90/p95.</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'
+    +'<div><div class="mfld">75th %ile</div><input class="mnum" id="mobHdw75" inputmode="decimal" value="'+mobEsc(uA.p75!=null?uA.p75:"")+'"></div>'
+    +'<div><div class="mfld">95th %ile</div><input class="mnum" id="mobHdw95" inputmode="decimal" value="'+mobEsc(uA.p95!=null?uA.p95:"")+'"></div></div>'
+    +'<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">'
+    +'<button class="mbtn" id="mobHdwApply">Apply anchors</button>'
+    +'<button class="mbtn ghost" id="mobHdwClear">Clear</button>';
+  const hp=wxPointsSel(p)[0];
+  if(hp&&hp.lat!=null){
+    const hl=(Math.round(hp.lat*2)/2).toFixed(1),ho=(Math.round(hp.lon*2)/2).toFixed(1);
+    const hu=(state.hdwUrl||HDW_PLOT_DEF).replace(/\{lat\}/g,hl).replace(/\{lon\}/g,ho);
+    h+='<a class="mbtn ghost" href="'+mobEsc(hu)+'" target="_blank" rel="noopener" style="text-decoration:none">Open GEFS plot \u2197</a>';}
+  h+='</div>';
+  h+='<div class="mnote" style="margin-top:9px">'+mobEsc(hc&&hc.report?hc.report:"Not set \u2014 HDW scores on absolute thresholds until anchored.")+'</div></div>';
+  /* calibration status */
+  h+='<div class="mcard"><div class="mkick" style="margin-bottom:8px">Calibration status</div><div class="mnote">'
+    +'Normals: '+(N?((N.src==="climo"?"FPB climatology ":"calibrated ")+mobEsc(N.span||N.at||"")+(N.tmaxSd?" \u00b7 \u03c3 scoring":" \u00b7 means-only (departure scoring)")):"not set \u2014 absolute thresholds")+'<br>'
+    +'Fuels ladders: '+(p&&p.climo?("calibrated "+mobEsc(p.climo.at||"")):"not calibrated \u2014 absolute thresholds")+'<br>'
+    +'ERC breakpoints: '+(p&&p.breaksPlaceholder?"placeholder \u2014 calibrate on the desktop":"set")+'<br>'
+    +'Deeper calibration (fuel-model climatology, WX normals, thresholds) stays on the Full view.'
+    +'</div></div>';
+  return h;}
+async function mobStnFind(){
+  const p=area();
+  if(!p||p.lat==null){toast("Resolve a zone first");return;}
+  MOB_STN.busy=true;MOB_STN.err=null;mobStnSheet();
+  try{
+    const fd={rings:p.fdraRings||null};
+    MOB_STN.cands=await rawsCandidates(fd,p.lat,p.lon,MOB_STN.rad);
+    const cur={};((p.stations)||[]).forEach(s=>{if(s.sel)cur[String(s.id)]=1;});
+    MOB_STN.cands.forEach(c=>{c.checked=!!cur[String(c.id)];});
+  }catch(e){MOB_STN.err=String(e&&e.message||e);MOB_STN.cands=null;}
+  MOB_STN.busy=false;mobStnSheet();}
+function mobStnApply(){
+  const p=area();const cands=MOB_STN.cands||[];
+  const picked=cands.filter(c=>c.checked);
+  if(!picked.length){toast("Select at least one station");return;}
+  const inC={};cands.forEach(c=>{inC[String(c.id)]=1;});
+  const keep=(p.stations||[]).filter(x=>!inC[String(x.id)]);
+  p.stations=keep.concat(picked.map(c=>({id:c.id,name:c.name,sel:true,
+    lat:c.lat!=null?c.lat:undefined,lon:c.lon!=null?c.lon:undefined})));
+  let over=p.stations.filter(s=>s.sel).length-MAX_RAWS;
+  for(let i=0;i<p.stations.length&&over>0;i++){if(p.stations[i].sel&&!inC[String(p.stations[i].id)]){p.stations[i].sel=false;over--;}}
+  persist();
+  try{renderStations();aggregateFems();}catch(e){}
+  $("mobSheet").classList.remove("on");
+  renderMob();
+  toast(picked.length+" station"+(picked.length===1?"":"s")+" saved for this zone \u2014 importing FEMS\u2026");
+  try{$("pullFemsBtn").onclick();}catch(e){}}
+function mobStnSheet(){
+  const sh=$("mobSheet"),inn=$("mobSheetIn");if(!sh||!inn)return;
+  const p=area();
+  const nSel=(MOB_STN.cands||[]).filter(c=>c.checked).length;
+  let h='<div style="display:flex;justify-content:space-between;align-items:baseline">'
+    +'<div style="font:400 20px Caprasimo,serif">Stations</div>'
+    +'<button id="mobSheetX" style="border:none;background:none;font:700 13px Figtree,sans-serif;color:var(--maccd);cursor:pointer;padding:4px 6px">Close \u2715</button></div>'
+    +'<div class="mnote" style="margin-bottom:10px">'+mobEsc((p&&(p.fdraName||p.name))||"")+' \u00b7 max '+MAX_RAWS+' selected</div>'
+    +'<div style="display:flex;gap:8px;align-items:end;margin-bottom:10px">'
+    +'<div style="flex:1"><div class="mfld">Radius (mi)</div><input class="mnum" id="mobStnRad" inputmode="numeric" value="'+MOB_STN.rad+'"></div>'
+    +'<button class="mbtn" id="mobStnFind"'+(MOB_STN.busy?" disabled":"")+'>'+(MOB_STN.busy?"Searching\u2026":"Find")+'</button></div>';
+  if(MOB_STN.err)h+='<div class="mnote" style="color:#a13c1c">'+mobEsc(MOB_STN.err)+'</div>';
+  else if(MOB_STN.cands==null)h+='<div class="mnote">Set a radius and press Find. In-zone, live, permanent stations are the safe default \u2014 portables and inactive sites are labelled so you can avoid them.</div>';
+  else if(!MOB_STN.cands.length)h+='<div class="mnote">No RAWS within '+MOB_STN.rad+' mi \u2014 widen the radius.</div>';
+  else{
+    h+='<div style="display:flex;flex-direction:column;gap:6px;max-height:44vh;overflow:auto">';
+    MOB_STN.cands.slice().sort(stnCapRank).forEach((c,i)=>{
+      const box='<button class="mzpin" data-tog="'+i+'" style="font-size:17px;color:'+(c.checked?"var(--macc)":"var(--mmut)")+'">'+(c.checked?"\u2611":"\u2610")+'</button>';
+      h+=mobStnRow(c,box);});
+    h+='</div>'
+      +'<div style="display:flex;gap:8px;margin-top:12px;align-items:center">'
+      +'<button class="mbtn" id="mobStnApply">Save '+nSel+' station'+(nSel===1?"":"s")+'</button>'
+      +'<span class="mnote" style="flex:1">Saving replaces this zone\u2019s roster and re-imports FEMS.</span></div>';}
+  inn.innerHTML=h;sh.classList.add("on");
+  $("mobSheetX").onclick=()=>sh.classList.remove("on");
+  sh.onclick=e=>{if(e.target===sh)sh.classList.remove("on");};
+  const rd=$("mobStnRad");if(rd)rd.onchange=()=>{const v=parseInt(rd.value,10);if(v>0)MOB_STN.rad=Math.min(200,v);};
+  const fb=$("mobStnFind");if(fb)fb.onclick=()=>mobStnFind();
+  inn.querySelectorAll("[data-tog]").forEach(b=>b.onclick=()=>{
+    const sorted=MOB_STN.cands.slice().sort(stnCapRank);
+    const c=sorted[+b.dataset.tog];
+    if(!c.checked&&MOB_STN.cands.filter(x=>x.checked).length>=MAX_RAWS){toast("Station cap is "+MAX_RAWS+" \u2014 deselect one first");return;}
+    c.checked=!c.checked;mobStnSheet();});
+  const ap=$("mobStnApply");if(ap)ap.onclick=()=>mobStnApply();}
 /* v93: Zones tab — pinned favorites on top, then search with a state filter over the
    492-zone index. One tap drops the zone POI and resolves it, exactly like the desktop
    zone dropdown + Resolve, so calibration, stations and climo normals all follow. */
@@ -3795,7 +3915,11 @@ function renderMobZones(root){
   const list=(typeof FWZ_LIST!=="undefined"&&FWZ_LIST)||[];
   const byId={};list.forEach(z=>{byId[z[0]]=z;});
   const states=[...new Set(list.map(z=>z[0].slice(0,2)))].sort();
-  let h='<div style="padding:6px 2px 2px"><div class="mzone" style="font-size:21px">My zones</div></div>';
+  const cur=area();
+  let h='<div style="padding:6px 2px 2px"><div class="mzone" style="font-size:21px">'+mobEsc((cur&&(cur.fdraName||cur.name))||"No zone")+'</div>'
+    +'<div class="mnote" style="margin-top:2px">Setup &amp; calibration for the zone you are on</div></div>';
+  h+=mobSetupHtml(cur);
+  h+='<div style="padding:14px 2px 2px"><div class="mzone" style="font-size:21px">My zones</div></div>';
   h+='<div style="display:flex;flex-direction:column;gap:7px">';
   h+=pins.length?pins.map(id=>byId[id]?mobZoneRow(byId[id],true):"").join("")
     :'<div class="mcard" style="font-size:11.5px;color:var(--mlab)">No pinned zones yet \u2014 star any zone below to keep it here.</div>';
@@ -3821,7 +3945,27 @@ function renderMobZones(root){
     const q2=$("mobZq");if(q2){q2.focus();try{q2.setSelectionRange(at,at);}catch(e){}}};
   const si=$("mobZst");if(si)si.onchange=()=>{MOB_Z.st=si.value;renderMob();};
   root.querySelectorAll("[data-go]").forEach(b=>b.onclick=()=>mobZoneGo(b.dataset.go));
-  root.querySelectorAll("[data-pin]").forEach(b=>b.onclick=()=>mobPinToggle(b.dataset.pin));}
+  root.querySelectorAll("[data-pin]").forEach(b=>b.onclick=()=>mobPinToggle(b.dataset.pin));
+  const sb=$("mobStnBtn");if(sb)sb.onclick=()=>{MOB_STN.cands=null;MOB_STN.err=null;mobStnSheet();};
+  const ap=$("mobHdwApply");
+  if(ap)ap.onclick=()=>{
+    const a=$("mobHdw75").value,b=$("mobHdw95").value;
+    if(num(a)==null||num(b)==null){toast("Enter both the 75th and 95th percentile values");return;}
+    /* reuse the desktop fit verbatim \u2014 one ladder math for both surfaces */
+    $("u_p75").value=a;$("u_p95").value=b;
+    try{
+      const rpt=usfsFitApply();
+      persist();renderPanels();renderAll();
+      toast("HDW ladder fit \u2014 thresholds seeded (T1\u2013T4 = p50/p75/p90/p95)");
+      console.info(rpt);
+    }catch(e){toast(String(e&&e.message||e));}};
+  const cb=$("mobHdwClear");
+  if(cb)cb.onclick=()=>{
+    const p=area();
+    if(p.hdwClimo&&p.hdwClimo.form==="usfs")delete p.hdwClimo;
+    $("u_p75").value="";$("u_p95").value="";
+    persist();renderPanels();renderAll();renderMob();
+    toast("HDW anchors cleared \u2014 back to absolute thresholds");};}
 /* v92: mobile Matrix — every dashboard row, Days 1–4 / 5–7 pages, zero horizontal scroll */
 function renderMobMatrix(root){
   const days=mobDays();const all=(fx.days||[]).length;
