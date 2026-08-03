@@ -256,7 +256,14 @@ body.mobOn #mobRoot{display:flex}
   --mmut:#8a7c66;--mlab:#645741;--macc:#c67139;--maccd:#8f4c1d;--msage:#7a8a5e;--msaged:#4f5c3a;
   --m0t:#e2ede4;--m1t:#e2eaf3;--m2t:#f9f3dd;--m3t:#faebde;--m4t:#f6e0df;--m2ink:#5f4a05;--mnt:#fffdf8;
   --mshc:0 2px 10px rgba(90,60,20,.08)}
-#mobScroll{flex:1;overflow:auto;-webkit-overflow-scrolling:touch;padding:14px 14px 96px;display:flex;flex-direction:column;gap:10px}
+#mobScroll{flex:1;overflow:auto;-webkit-overflow-scrolling:touch;padding:14px 14px 108px;display:flex;flex-direction:column;gap:10px}
+/* v97: flex items shrink by default — once the setup panel made the column taller than
+   the viewport, the one child with its own overflow (the zone window) collapsed to zero
+   height and the FWZ list vanished. Nothing in this column may shrink. */
+#mobScroll>*{flex-shrink:0}
+/* v97: no pinch-zoom anywhere in the mobile shell; the map gets its own rules when it lands */
+#mobRoot{touch-action:pan-y}
+#mobRoot .mzwin{touch-action:pan-y}
 #mobRoot .mcard{background:var(--msur);border:1px solid var(--mline2);border-radius:18px;padding:14px 14px 12px;box-shadow:var(--mshc)}
 #mobRoot .mkick{font-size:10px;letter-spacing:.18em;font-weight:700;color:var(--mmut);text-transform:uppercase}
 #mobRoot .mpill{font:700 10.5px ui-monospace,Menlo,monospace;border:1px solid var(--mline);border-radius:999px;padding:3px 9px;color:var(--mlab);white-space:nowrap;background:none;cursor:default}
@@ -277,8 +284,11 @@ body.mobOn #mobRoot{display:flex}
 #mobStrip .sdn{font-size:8.5px;font-weight:800;letter-spacing:.05em;opacity:.92}
 #mobStrip .sadj{font-size:9.5px;font-weight:800}
 #mobStrip .ssc{font:600 9px ui-monospace,Menlo,monospace;opacity:.85}
-#mobTabs{position:fixed;left:0;right:0;bottom:0;display:flex;background:rgba(253,248,238,.94);backdrop-filter:blur(10px);border-top:1px solid var(--mline2);padding:8px 10px calc(10px + env(safe-area-inset-bottom));gap:8px;z-index:60}
-#mobTabs button{flex:1;border:none;border-radius:14px;padding:10px 4px;font:700 12px Figtree,sans-serif;cursor:pointer;background:none;color:var(--mlab)}
+/* v97: floating pill bar — lifted off the bottom edge so the tabs are actually thumb-reachable */
+#mobTabs{position:fixed;left:12px;right:12px;bottom:calc(16px + env(safe-area-inset-bottom));display:flex;
+  background:rgba(253,248,238,.92);backdrop-filter:blur(14px);border:1px solid var(--mline2);
+  border-radius:18px;box-shadow:0 6px 22px rgba(90,60,20,.16);padding:7px;gap:6px;z-index:60}
+#mobTabs button{flex:1;border:none;border-radius:13px;padding:11px 4px;font:700 12px Figtree,sans-serif;cursor:pointer;background:none;color:var(--mlab);touch-action:manipulation}
 #mobTabs button.on{background:var(--macc);color:#fdf8ee}
 #mobSheet{position:fixed;inset:0;z-index:70;display:none;background:rgba(46,43,37,.45)}
 #mobSheet.on{display:block}
@@ -788,7 +798,7 @@ const OM_MODELS_FULL=["gfs_seamless","ecmwf_ifs025","icon_seamless","gem_seamles
 const OM_MODELS_LEAN=["gfs_seamless","ecmwf_ifs025"];
 function omModels(){return state.ensMode==="full"?OM_MODELS_FULL:OM_MODELS_LEAN;}
 function ensembleLab(){return state.ensMode==="full"?((OM_MODELS_FULL.length+1)+" · full ensemble"):((OM_MODELS_LEAN.length+1)+" · lean (GFS+ECMWF+NWS)");}
-const APP_VERSION="96"; /* PWA — bump together with sw.js CACHE on every release */
+const APP_VERSION="97"; /* PWA — bump together with sw.js CACHE on every release */
 const MAX_RAWS=5; /* v84: station cap per area — API discipline; pickers rank active-first, then nearest */
 const PDS_RE=/particularly\s+dangerous\s+situation/i; /* v84: PDS wording inside a Red Flag Warning — display only */
 /* ==================== v86: narrative pools — driven by / held in check ==================== */
@@ -2149,9 +2159,14 @@ function parseRawsFeatures(rj){
     const tyv=tyk?String(a[tyk]):"";
     const nameSig=/\b(portable|temp\.?|temporary|incident|mobile|trailer)\b/i.test(nm);
     let temporary=null;
+    const sid=String(a[idk]).trim();
     if(/portab|temporar|\btemp\b|mobile|incident/i.test(tyv))temporary=true;
     else if(/permanen|fixed|standard/i.test(tyv))temporary=false;
     else if(nameSig)temporary=true;
+    /* v97 (field-verified in ORZ692): permanent RAWS carry 6-digit NWS ids; incident/portable
+       IRAWS come through with 7-8 digits. Only consulted when the layer gives no type column
+       and the name says nothing, so an explicit "Permanent" always wins. */
+    else if(/^\d{7,}$/.test(sid))temporary=true;
     found.push({id:String(a[idk]).trim(),name:nm,
       lat:(typeof geo.y==="number")?geo.y:null,lon:(typeof geo.x==="number")?geo.x:null,
       statusTxt:stk?String(a[stk]).trim():null,
@@ -3599,7 +3614,10 @@ function mobInk(lv){return lv==null?"var(--mlab)":(lv===2?"#4a3a04":"#fffdf8");}
 /* v94: pills stay full-strength so severity still pops against the quieter cells */
 function mobPillInk(lv){return lv==null?"var(--mlab)":(lv===2?"#4a3a04":"#fdf8ee");}
 /* short units for narrow mobile cells — the desktop matrix keeps the full strings */
-const MOB_UN={vi:"kt\u00d7kft",hdw:"hPa\u00b7m/s",tmax:"\u00b0F",rhmin:"%",rhrec:"%",wind:"mph",gust:"mph",precip:"in",pot:"%",cape:"J/kg"};
+const MOB_UN={vi:"kt\u00d7kft",hdw:"hPa\u00b7m/s",tmax:"\u00b0F",rhmin:"%",rhrec:"%",wind:"mph",gust:"mph",precip:"in",pot:"%",cape:"J/kg",
+  erc:"",bi:"",ic:"",kbdi:"",gsi:"",hainesH:"",hainesM:"",wdir:"",dryltg:"",fm100:"%",fm1000:"%",lfm:"%",lfw:"%"};
+/* v97: ranges belong beside the row name, not trailing the value */
+const MOB_RANGE={hainesH:"2\u20136",hainesM:"2\u20136",ic:"0\u2013100",kbdi:"0\u2013800",gsi:"0\u20131"};
 const MOB_SHORT={erc:"ERC",bi:"Burning Index",ic:"IC",fm100:"100-hr FM",fm1000:"1000-hr FM",
   lfm:"Live herb FM",lfw:"Live woody FM",tmax:"Max temp",rhmin:"Min RH",rhrec:"RH recovery",
   wind:"Wind",gust:"Gusts",precip:"Precip",dryltg:"Dry lightning",kbdi:"KBDI"};
@@ -3650,18 +3668,22 @@ function mobTint(lv){return lv==null?"var(--mnt)":"var(--m"+lv+"t)";}
 function mobDays(){return fx.days&&fx.days.length?fx.days.map((_,i)=>scoreDay(i)):[];}
 function mobSel(){const n=(fx.days||[]).length;if(!n)return 0;
   const s=(state.ui&&state.ui.selDay)||0;return Math.max(0,Math.min(s,n-1));}
-function mobCellRaw(nm,txt,un,lv,sub){
+function mobCellRaw(nm,txt,un,lv,sub,inlineSub){
   const empty=txt==null;
   const ink=empty?"var(--mlab)":mobInk(lv);
+  /* v97: fuels carry their percentile context inline, right of the number \u2014 smaller and faded */
+  const tail=(inlineSub&&sub&&!empty)
+    ?' <span style="color:inherit;opacity:.72;font:600 9.5px Figtree,sans-serif;white-space:nowrap">'+mobEsc(ordPct(sub))+'</span>':'';
   return '<div class="mcell" style="background:'+(empty?"var(--mnt)":mobFill(lv,MOB_A_BRIEF))+';color:'+ink+';border-color:transparent">'
     +'<div style="min-width:0;flex:1"><div class="nm" style="color:inherit;opacity:.85">'+mobEsc(nm)+'</div>'
-    +'<div class="vl">'+(empty?'<span style="opacity:.35">\u2014</span>':mobEsc(txt)+' <span class="un" style="color:inherit;opacity:.75">'+mobEsc(un)+'</span>')+'</div>'
-    +(sub?'<div class="sb" style="color:inherit;opacity:.8">'+mobEsc(ordPct(sub))+'</div>':'')
+    +'<div class="vl">'+(empty?'<span style="opacity:.35">\u2014</span>':mobEsc(txt)
+      +(un?' <span class="un" style="color:inherit;opacity:.75">'+mobEsc(un)+'</span>':'')+tail)+'</div>'
+    +(sub&&!inlineSub?'<div class="sb" style="color:inherit;opacity:.8">'+mobEsc(ordPct(sub))+'</div>':'')
     +'</div></div>';}
 function mobCellHtml(r,i,withSub){
   const cv=r.val(i);if(cv.v==null&&cv.txt==null)return "";
   const lv=r.sev(i,cv.v);
-  return mobCellRaw(mobName(r),cv.txt!=null?cv.txt:cv.v,mobUn(r),lv,withSub?cv.sub:null);}
+  return mobCellRaw(mobName(r),cv.txt!=null?cv.txt:cv.v,mobUn(r),lv,withSub?cv.sub:null,withSub==="inline");}
 function mobTabsSync(){const b=$("mobTabBrief"),m=$("mobTabMatrix"),z=$("mobTabZones");
   if(b)b.classList.toggle("on",MOB_TAB.v==="brief");
   if(m)m.classList.toggle("on",MOB_TAB.v==="matrix");
@@ -3759,7 +3781,7 @@ function renderMob(){
     /* v92: fixed 2x2 fuels box */
     const fu=[];
     for(const id of MOB_FU_IDS){const r=rowById(id);if(!r){fu.push(mobCellRaw(id,null,"",null,null));continue;}
-      const cell=mobCellHtml(r,si,false);fu.push(cell||mobCellRaw(mobName(r),null,mobUn(r),null,null));}
+      const cell=mobCellHtml(r,si,"inline");fu.push(cell||mobCellRaw(mobName(r),null,mobUn(r),null,null));}
     h+='<div class="mcard"><div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:9px">'
       +'<div class="mkick">Fuels &amp; NFDRS — FM '+mobEsc((p&&p.fuelModel)||"Y")+'</div>'
       +'<span style="font:600 9px Figtree,sans-serif;letter-spacing:.05em;color:var(--mmut)">RAWS · FEMS</span></div>'
@@ -4035,8 +4057,13 @@ function mobSheetOpen(){
     const lv=r.sev(si,cv.v);
     /* v93: the Brief sheet stays clean — value and rating only. Percentiles, departures
        and the row definitions live in the Matrix tab. */
-    h+='<div class="srow" data-rid="'+mobEsc(r.id)+'" style="cursor:default"><div class="nm">'+mobEsc(r.nm)+'</div>'
-      +'<div class="vl">'+mobEsc(cv.txt!=null?cv.txt:cv.v)+' '+mobEsc(mobUn(r))+'</div>'
+    /* v97: name carries the range in parentheses; the value stands alone with its unit only
+       when the unit actually says something (no ERC-Y, no "16-pt \u00b7 deg", no dry-lightning recipe) */
+    const rng=MOB_RANGE[r.id];
+    const un=mobUn(r);
+    h+='<div class="srow" data-rid="'+mobEsc(r.id)+'" style="cursor:default"><div class="nm">'
+      +mobEsc(r.nm)+(rng?' <span style="color:var(--mmut);font-weight:400">('+mobEsc(rng)+')</span>':'')+'</div>'
+      +'<div class="vl">'+mobEsc(cv.txt!=null?cv.txt:cv.v)+(un?' '+mobEsc(un):'')+'</div>'
       +'<span class="schip" style="background:'+(lv==null?"var(--mnt)":mobFill(lv,1))+';color:'+mobPillInk(lv)+'">'+(lv==null?"\u2014":MOB_ADJ_P[lv])+'</span></div>';}
   inn.innerHTML=h;sh.classList.add("on");
   $("mobSheetX").onclick=()=>sh.classList.remove("on");
