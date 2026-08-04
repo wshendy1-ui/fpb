@@ -324,6 +324,13 @@ body.mobOn{overflow:hidden}
 #mobRoot .mtxcell .cv{font:700 12px ui-monospace,Menlo,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 #mobRoot .mtxcell .cs{font:600 8.5px Figtree,sans-serif;opacity:.82;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 #mobRoot .mtxname{cursor:pointer}
+/* v101: horizon brackets size to their content — two drivers plus an inhibitor, wrapped */
+#mobRoot .mbrk{border:1px solid var(--mline2);border-radius:12px;padding:9px 10px 10px;background:var(--mnt);min-width:0;display:flex;flex-direction:column;gap:4px}
+#mobRoot .mbrk .bk{font-size:9px;letter-spacing:.14em;font-weight:700;color:var(--mmut)}
+#mobRoot .mbrk .badj{font-size:14px;font-weight:800;line-height:1.1}
+#mobRoot .mbrk .bline{display:flex;gap:5px;align-items:baseline;min-width:0}
+#mobRoot .mbrk .btag{flex:none;font:800 7.5px Figtree,sans-serif;letter-spacing:.05em;border-radius:5px;padding:1px 4px;line-height:1.35}
+#mobRoot .mbrk .btxt{font-size:10.5px;line-height:1.35;color:var(--mlab);overflow-wrap:anywhere}
 #mobRoot .mtxflag{display:inline-block;font:800 7.5px Figtree,sans-serif;letter-spacing:.05em;border:1px solid;border-radius:5px;padding:1px 4px;vertical-align:1px;white-space:nowrap}
 #mobRoot .mtxdesc{font-size:10.5px;line-height:1.5;color:var(--mlab);background:var(--mnt);border:1px solid var(--mline2);border-radius:10px;padding:8px 10px;margin:2px 0 5px}
 /* v93: uniform severity pills */
@@ -803,6 +810,16 @@ const FM_VARY={erc:1,bi:1,ic:1,sc:1}; /* the only fields that differ by fuel mod
 const fmBase=f=>f.replace(/_[VWXYZ]$/,""); /* erc_V → erc for direction/threshold lookups */
 const FEMS_KEEP_DAYS=60; /* rolling window for stored FEMS dailies — referenced by pruneFems() during boot migration */
 const IDX_MAX={erc:1,bi:1,ic:1,sc:1,kbdi:1};   /* severity direction: daily/area max */
+/* v100: NFDRS daily indices are defined at 13:00 LST. For finished days the daily max over
+   hourly rows is a fair worst case and it never moves again. For TODAY it ratchets: each
+   re-import adds later hours, so BI could only climb through the afternoon regardless of
+   what the fuels did. Today therefore follows the standard - the 13:00 observation is the
+   day's value, and until that exists we prefer the forecast row, which is issued once and
+   holds still. Ranked: 13:00 observation > forecast > partial-day observation. */
+const FEMS_D0_HOUR=13;              /* NFDRS observation hour (local) */
+const FEMS_OBS_READY_HOUR=14;       /* local hour after which today's 13:00 obs should exist */
+const FEMS_SRC_RANK={obs13:3,fcst:2,obsPartial:1};
+function femsSrcLabel(s){return s==="obs13"?"obs 13:00":s==="fcst"?"forecast":s==="obsPartial"?"partial obs":null;}
 const FM_MIN={fm1:1,fm10:1,fm100:1,fm1000:1,lfm:1,lfw:1,woody:1}; /* severity direction: daily/area min */
 let LAST_IMPORT={sids:[]};
 let MIGRATE_ERR=null;
@@ -815,7 +832,7 @@ const OM_MODELS_FULL=["gfs_seamless","ecmwf_ifs025","icon_seamless","gem_seamles
 const OM_MODELS_LEAN=["gfs_seamless","ecmwf_ifs025"];
 function omModels(){return state.ensMode==="full"?OM_MODELS_FULL:OM_MODELS_LEAN;}
 function ensembleLab(){return state.ensMode==="full"?((OM_MODELS_FULL.length+1)+" · full ensemble"):((OM_MODELS_LEAN.length+1)+" · lean (GFS+ECMWF+NWS)");}
-const APP_VERSION="99"; /* PWA — bump together with sw.js CACHE on every release */
+const APP_VERSION="101"; /* PWA — bump together with sw.js CACHE on every release */
 const MAX_RAWS=5; /* v84: station cap per area — API discipline; pickers rank active-first, then nearest */
 const PDS_RE=/particularly\s+dangerous\s+situation/i; /* v84: PDS wording inside a Red Flag Warning — display only */
 /* ==================== v86: narrative pools — driven by / held in check ==================== */
@@ -1693,7 +1710,43 @@ async function omFetch(pts,m,drop){
   throw new Error("request still rejected after dropping variables");
 }
 /* fetch all point×model samples; partial model failures are tolerated */
-const WX_TTL=45*60*1000;
+/* v100: how long a cached model pull stays good. Weather is refreshed on age, on model
+   cycle boundaries, and on the date rolling over; alerts are never cached; fuels refresh
+   only when today's row is missing and the 13:00 observation could exist yet. All exposed
+   for field tuning. */
+const WX_TTL=3*60*60*1000;                 /* 3 h */
+const WX_CYCLE_HOURS=[5,11,17,23];         /* local hours the 00/06/12/18Z runs land by */
+function wxCycleStart(now){
+  const d=new Date(now);const h=d.getHours();
+  let c=WX_CYCLE_HOURS[0],prevDay=true;
+  for(const x of WX_CYCLE_HOURS)if(h>=x){c=x;prevDay=false;}
+  const s=new Date(d.getFullYear(),d.getMonth(),d.getDate(),c,0,0,0);
+  if(prevDay)s.setDate(s.getDate()-1),s.setHours(WX_CYCLE_HOURS[WX_CYCLE_HOURS.length-1]);
+  return s.getTime();
+}
+/* why a refresh is (or is not) needed — a string reason keeps this debuggable in the field */
+function wxStaleReason(now){
+  now=now||Date.now();
+  const c=state.wxCache;
+  if(!c||!c.at||!c.data||!c.data.samples||!c.data.samples.length)return "no-cache";
+  if(!c.data.days||c.data.days[0]!==genDays()[0])return "date-rolled";
+  if((now-c.at)>=WX_TTL)return "age";
+  if(c.at<wxCycleStart(now))return "new-cycle";
+  return null;
+}
+function femsStaleReason(p,now){
+  now=now||Date.now();
+  p=p||area();
+  if(!p||!(p.stations||[]).some(s=>s.sel))return null;      /* nothing to pull */
+  const today=genDays()[0];
+  const src=(p.femsSrcBy||{})[today]||{};
+  const have=p.femsBy&&p.femsBy[today]&&Object.keys(p.femsBy[today]).length;
+  if(!have)return "no-row";
+  /* upgrade a forecast/partial day-0 to the 13:00 observation once it should exist */
+  const best=Object.keys(src).filter(k=>k!=="__day").map(k=>FEMS_SRC_RANK[src[k]]||0).sort((a,b)=>b-a)[0]||0;
+  if(best<FEMS_SRC_RANK.obs13&&new Date(now).getHours()>=FEMS_OBS_READY_HOUR)return "obs13-due";
+  return null;
+}
 function wxCacheKey(pts){return pts.map(x=>(+x.lat).toFixed(3)+","+(+x.lon).toFixed(3)).join(";");}
 async function fetchOpenMeteoCached(p,force){
   const pts=wxPointsSel(p).slice(0,1);
@@ -2035,7 +2088,8 @@ async function fetchFems(p,prog){
       prog(ds==="observation"?"observed NFDRS…":"forecast NFDRS…");
       const r=await jget(femsUrlFor(ds));
       const txt=await r.text();
-      let k=0;try{k=importFemsJson(JSON.parse(txt),{});}catch(e){k=Math.max(0,importFemsCsv(txt,"API",{silent:true}));}
+      const dsTyp=(ds==="observation")?"O":"F";
+        let k=0;try{k=importFemsJson(JSON.parse(txt),{typ:dsTyp});}catch(e){k=Math.max(0,importFemsCsv(txt,"API",{silent:true,typ:dsTyp}));}
       n+=k;
       if(k>0&&ids.length>1){
         const got=LAST_IMPORT.sids.filter(s=>ids.indexOf(s)>=0).length;
@@ -2050,7 +2104,8 @@ async function fetchFems(p,prog){
     for(const ds of ["observation","forecast"]){
       try{prog("retry ("+(p.fuelModel||"Y")+" only)…");
         const r=await jget(femsUrlFor(ds));const txt=await r.text();
-        let k=0;try{k=importFemsJson(JSON.parse(txt),{});}catch(e){k=Math.max(0,importFemsCsv(txt,"API",{silent:true}));}
+        const dsTyp=(ds==="observation")?"O":"F";
+        let k=0;try{k=importFemsJson(JSON.parse(txt),{typ:dsTyp});}catch(e){k=Math.max(0,importFemsCsv(txt,"API",{silent:true,typ:dsTyp}));}
         n2+=k;}catch(e){errs.push("retry "+ds+": "+e.message);}
     }
     if(n2>0){n=n2;toast("FEMS accepted single-model requests only — pulling "+(p.fuelModel||"Y")+"; switch models to pull others");}
@@ -2076,7 +2131,8 @@ async function fetchFems(p,prog){
           await sleep(600);
           const r=await jget(femsUrlFor(ds,id));
           const txt=await r.text();
-          let k=0;try{k=importFemsJson(JSON.parse(txt),{forceSid:id});}catch(e){k=Math.max(0,importFemsCsv(txt,"API",{silent:true,forceSid:id}));}
+          const dsTyp=(ds==="observation")?"O":"F";
+          let k=0;try{k=importFemsJson(JSON.parse(txt),{forceSid:id,typ:dsTyp});}catch(e){k=Math.max(0,importFemsCsv(txt,"API",{silent:true,forceSid:id,typ:dsTyp}));}
           n+=k;
         }catch(e){errs.push(ds+" "+id+": "+e.message);}
       }
@@ -2797,7 +2853,7 @@ function hourFrom(dateStr,timeStr){
   return null;
 }
 function mapHasValues(map){return CSV_FIELDS.some(d=>!CSV_META[d.f]&&map[d.f]!=null);}
-function collectCsvEntries(parsed,map,srcId,forceSid){
+function collectCsvEntries(parsed,map,srcId,forceSid,defTyp){
   if(map.date==null||!mapHasValues(map))return null;
   const entries=[];
   for(const c of parsed.rows){
@@ -2819,13 +2875,13 @@ function collectCsvEntries(parsed,map,srcId,forceSid){
       else vals[def.f]=v; /* moistures & KBDI are model-independent */
     }
     if(!Object.keys(vals).length)continue;
-    const typ=(map.nfdrtype!=null&&c[map.nfdrtype])?String(c[map.nfdrtype]).trim().toUpperCase().slice(0,1):null;
+    const typ=(map.nfdrtype!=null&&c[map.nfdrtype])?String(c[map.nfdrtype]).trim().toUpperCase().slice(0,1):(defTyp||null);
     entries.push({sid:sid,day:day,typ:typ,hour:hourFrom(c[map.date],map.time!=null?c[map.time]:null),vals:vals});
   }
   return entries;
 }
-function applyCsvMap(parsed,map,srcId,forceSid){
-  const entries=collectCsvEntries(parsed,map,srcId,forceSid);
+function applyCsvMap(parsed,map,srcId,forceSid,defTyp){
+  const entries=collectCsvEntries(parsed,map,srcId,forceSid,defTyp);
   return entries?storeFemsRows(entries):0;
 }
 /* Reduce (station, day) groups to one daily WORST-CASE record, matching the
@@ -2839,7 +2895,28 @@ function reduceEntriesDaily(entries){
     let g=groups[k].slice();const sid=g[0].sid,day=g[0].day;
     /* v89: FEMS table exports mix observed (O) and forecast (F) rows in one file — when a
        date carries both, the observation wins outright. API pulls are homogeneous per call. */
-    if(g.some(e=>e.typ==="O")&&g.some(e=>e.typ==="F"))g=g.filter(e=>e.typ!=="F");
+    /* v100: today only — no max across a growing set of hours. This runs BEFORE the v89
+       O-beats-F filter, because before 13:00 the forecast row is the one we want and the
+       v89 rule would have discarded it. */
+    const isToday=(day===genDays()[0]);
+    let d0src=null;
+    if(!isToday){
+      if(g.some(e=>e.typ==="O")&&g.some(e=>e.typ==="F"))g=g.filter(e=>e.typ!=="F");
+    }
+    if(isToday){
+      const obs=g.filter(e=>e.typ!=="F");
+      const at13=obs.filter(e=>e.hour!=null&&e.hour>=FEMS_D0_HOUR);
+      if(at13.length){
+        at13.sort((a,b)=>Math.abs(a.hour-FEMS_D0_HOUR)-Math.abs(b.hour-FEMS_D0_HOUR));
+        g=[at13[0]];d0src="obs13";
+      }else if(g.some(e=>e.typ==="F")){
+        g=g.filter(e=>e.typ==="F");d0src="fcst";
+      }else{
+        /* only partial-day observations exist: take the latest single hour, never the max */
+        const part=obs.slice().sort((a,b)=>((b.hour==null?-1:b.hour)-(a.hour==null?-1:a.hour)));
+        if(part.length){g=[part[0]];d0src="obsPartial";}
+      }
+    }
     g.sort((a,b)=>{ /* nearest-13:00 first: only matters for direction-less fields */
       const ah=a.hour==null?99:Math.abs(a.hour-13),bh=b.hour==null?99:Math.abs(b.hour-13);
       return (ah-bh)||((b.hour==null?-1:b.hour)-(a.hour==null?-1:a.hour));
@@ -2853,7 +2930,7 @@ function reduceEntriesDaily(entries){
       /* else: first value wins = nearest 13:00 */
     }
     if(rec.lfw==null&&rec.woody!=null)rec.lfw=rec.woody; /* legacy/odd headers land woody under its own key */
-    out.push({sid:sid,day:day,vals:rec});
+    out.push({sid:sid,day:day,vals:rec,src:d0src});
   }
   return out;
 }
@@ -2872,12 +2949,27 @@ function storeFemsRows(entries){
   pruneFems(p);
   const recs=reduceEntriesDaily(entries);
   const w={};
+  const today=genDays()[0];
+  p.femsSrcBy=p.femsSrcBy||{};
   for(const r of recs){
     const dayo=p.femsBy[r.day]=p.femsBy[r.day]||{};
+    /* v100: on today, a partial-obs or forecast pull must not displace a better source that
+       is already stored — otherwise the two dataset calls fight each other every refresh. */
+    if(r.day===today&&r.src){
+      const prevSrc=(p.femsSrcBy[today]||{})[r.sid];
+      const prevDay=(p.femsSrcBy[today]||{}).__day;
+      const stale=(prevDay&&prevDay!==today);
+      if(!stale&&prevSrc&&(FEMS_SRC_RANK[prevSrc]||0)>(FEMS_SRC_RANK[r.src]||0)){w[r.sid]=1;continue;}
+      p.femsSrcBy[today]=p.femsSrcBy[today]||{};
+      p.femsSrcBy[today].__day=today;
+      p.femsSrcBy[today][r.sid]=r.src;
+    }
     const tgt=dayo[r.sid]=dayo[r.sid]||{};
     for(const f in r.vals)tgt[f]=Math.round(r.vals[f]*10)/10;
     w[r.sid]=1;
   }
+  /* yesterday's provenance is meaningless once the date rolls */
+  for(const k in p.femsSrcBy)if(k!==today)delete p.femsSrcBy[k];
   LAST_IMPORT={sids:Object.keys(w)};
   /* v89: rows for stations not on this area's roster get dropped by the ghost purge —
      say so instead of importing them into silence. */
@@ -2907,7 +2999,7 @@ function importFemsCsv(text,srcId,opts){
     openMapDlg(parsed,map,srcId,sig);
     return -1;
   }
-  const n=applyCsvMap(parsed,map,srcId,opts.forceSid);
+  const n=applyCsvMap(parsed,map,srcId,opts.forceSid,opts.typ);
   if(n>0&&!saved){state.csvMaps=state.csvMaps||{};state.csvMaps[sig]=map;}
   if(n===0&&!opts.silent)toast("Columns matched but 0 rows imported — check the fuel-model column, or open Map columns…");
   return n;
@@ -2952,7 +3044,7 @@ function importFemsJson(j,opts){
       if(best)vals[def.f]=best.v;
     }
     if(!Object.keys(vals).length)continue;
-    entries.push({sid:sid,day:day,hour:hourFrom(dRaw,r.time||r.nfdrTime||null),vals:vals});
+    entries.push({sid:sid,day:day,typ:opts.typ||null,hour:hourFrom(dRaw,r.time||r.nfdrTime||null),vals:vals});
   }
   return storeFemsRows(entries);
 }
@@ -3596,6 +3688,41 @@ function renderVerify(){
   else if(L.fm!==fm)h+=' \u00b7 <span class="vtag">logged on model '+esc(L.fm)+' \u2014 switch back to compare</span>';
   el.innerHTML=h;el.style.display="";
 }
+/* v100: what opening the app actually does.
+   - alerts always refresh: an RFW issued since the last look must never be invisible
+   - weather refreshes only when the cache is stale by age, cycle, or date
+   - fuels refresh only when today's row is missing or is due an upgrade to the 13:00 obs
+   Everything else is served from what is already on disk, so a cold open in a canyon with
+   no signal still shows the last good briefing instead of a blank sheet. */
+async function bootRefresh(){
+  const p=area();if(!p||p.lat==null)return;
+  const wxWhy=wxStaleReason();
+  const femsWhy=femsStaleReason(p);
+  if(wxWhy){await runFetchAll(!!femsWhy,false);return;}
+  /* cache is good: rebuild the rows from it, then top up the cheap/volatile pieces */
+  try{
+    const c=state.wxCache;
+    OM_S={days:c.data.days,samples:c.data.samples,fails:c.data.fails||[]};
+    aggregateWx();
+    setPill("om","ok","cached "+Math.max(1,Math.round((Date.now()-c.at)/60000))+" min ago — Refresh all data pulls fresh");
+    try{const g=await fetchNwsGrid(p);buildFromNws(g);setPill("nws","ok",buildFromNws.diag||"");}catch(e){}
+  }catch(e){await runFetchAll(!!femsWhy,false);return;}
+  try{const al=await fetchAlerts(p);fx.alertsList=al;fx.status.alerts="ok";buildAlerts(al);setPill("alerts","ok");}
+  catch(e){setPill("alerts","fail","NWS alerts unreachable: "+e.message);}
+  if(femsWhy){try{setPill("fems","wait");const nF=await fetchFems(p);setPill("fems","ok","Parsed "+nF+" rows ("+femsWhy+")");}
+    catch(e){setPill("fems","fail","FEMS API blocked or schema mismatch ("+e.message+"). Use CSV paste — it always works.");}}
+  /* the header stamp is the DATA's vintage, not the moment we rendered it */
+  fx.at=new Date(state.wxCache.at);
+  document.getElementById("issuedEl").textContent="Issued "+fx.at.toLocaleString([],{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"})+" \u00b7 cached";
+  calcRecalc();renderAll();renderDataAge();
+}
+/* returning to a backgrounded app: silently catch up if the cache went stale while away */
+document.addEventListener("visibilitychange",()=>{
+  if(document.visibilityState!=="visible")return;
+  if(!state.autoFetch||!area()||area().lat==null)return;
+  if(navigator.onLine===false)return;
+  if(wxStaleReason()||femsStaleReason())bootRefresh();
+});
 /* ---------- data-age pill ---------- */
 function renderDataAge(){
   const el=$("dataAge");if(!el)return;
@@ -3605,7 +3732,10 @@ function renderDataAge(){
   const hrs=mins/60;
   const when=new Date(at);
   const lab=hrs<1?(mins+"m ago"):(Math.round(hrs*10)/10+"h ago");
-  el.textContent="wx data: "+when.toLocaleString([],{weekday:"short",hour:"numeric",minute:"2-digit"})+" ("+lab+")"+(hrs>=18?" \u2014 refresh":"");
+  const why=wxStaleReason();
+  el.textContent="wx data: "+when.toLocaleString([],{weekday:"short",hour:"numeric",minute:"2-digit"})+" ("+lab+")"
+    +(why?(" \u2014 "+(why==="date-rolled"?"new day":why==="new-cycle"?"new model cycle":"stale")+", refresh"):"");
+  el.style.color=why?"#8a4b12":"";
   el.className="agepill"+(hrs>=36?" bad":hrs>=18?" warn":"");
   el.style.display="";
   el.onclick=()=>{const b=$("fetchBtn");if(b&&!b.disabled)b.click();};
@@ -3640,6 +3770,33 @@ const MOB_SHORT={erc:"ERC",bi:"Burning Index",ic:"IC",fm100:"100-hr FM",fm1000:"
   wind:"Wind",gust:"Gusts",precip:"Precip",dryltg:"Dry lightning",kbdi:"KBDI"};
 function mobName(r){return MOB_SHORT[r.id]||r.nm.split("(")[0].trim();}
 function mobUn(r){return MOB_UN[r.id]!==undefined?MOB_UN[r.id]:rowUn(r);}
+/* v101: the narrative builders phrase rows by their full display name ("Energy Release
+   Component 90-97th"), which is too long for a half-width bracket card. Rewrite those to
+   the same short labels the cells use — built from ROWS so the two can never drift. */
+let MOB_ABBR_RE=null;
+/* narrative-only overrides: a bracket line is half a screen wide, so it can go shorter than
+   the cell labels do (the cells have room for "Burning Index"; a driver phrase does not) */
+const MOB_ABBR_X={bi:"BI",hainesH:"Haines H",hainesM:"Haines M",rhrec:"RH recov",dryltg:"Dry ltg"};
+function mobAbbrInit(){
+  if(MOB_ABBR_RE)return MOB_ABBR_RE;
+  const pairs=[];
+  for(const r of ROWS){
+    if(r.grp)continue;
+    const short=MOB_ABBR_X[r.id]||MOB_SHORT[r.id];
+    if(!short)continue;
+    const long=r.nm.split("(")[0].trim();
+    if(long&&long!==short)pairs.push([long,short]);
+  }
+  pairs.sort((a,b)=>b[0].length-a[0].length); /* longest first: no partial shadowing */
+  MOB_ABBR_RE=pairs;
+  return pairs;
+}
+function mobAbbr(s){
+  if(s==null)return s;
+  let out=String(s);
+  for(const [long,short] of mobAbbrInit())if(out.indexOf(long)>=0)out=out.split(long).join(short);
+  return out;
+}
 const MOB_TAB={v:"brief"};const MOB_MR={v:0};
 function rowById(id){for(const r of ROWS){if(!r.grp&&r.id===id)return r;}return null;}
 function rowUn(r){const u=typeof r.un==="function"?r.un():r.un;return u||"";}
@@ -3776,13 +3933,22 @@ function renderMob(){
   h+='</div>';
   if(has&&days.length>3){
     const bk=[["DAYS 1–3",[0,1,2]],["DAYS 4–7",[3,4,5,6].filter(i=>i<days.length)]];
-    h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px">';
+    h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;align-items:stretch">';
     for(const[lab,idxs]of bk){const hs=horizonScore(idxs,days);const lv=adjLevel(hs);
-      const why=horizonDrivers(idxs,days)[0]||(horizonModerators(idxs,days)[0]?"held by "+horizonModerators(idxs,days)[0]:"—");
-      h+='<div style="border:1px solid var(--mline2);border-radius:12px;padding:8px 10px;background:var(--mnt);min-width:0;overflow:hidden">'
-        +'<div style="font-size:9px;letter-spacing:.14em;font-weight:700;color:var(--mmut)">'+lab+'</div>'
-        +'<div style="font-size:14px;font-weight:800;color:'+(lv==null?"var(--mmut)":mobLv(lv))+';margin-top:2px">'+(lv==null?"—":ADJ[lv])+'</div>'
-        +'<div style="font-size:10.5px;color:var(--mmut);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+mobEsc(why)+'</div></div>';}
+      /* v101: show the whole reason, not the first clipped line of it */
+      const drv=horizonDrivers(idxs,days);
+      const mod=horizonModerators(idxs,days);
+      h+='<div class="mbrk"><div class="bk">'+lab+'</div>'
+        +'<div class="badj" style="color:'+(lv==null?"var(--mmut)":mobLv(lv))+'">'+(lv==null?"\u2014":ADJ[lv])+'</div>';
+      if(drv.length)for(const s of drv)
+        h+='<div class="bline"><span class="btag" style="background:var(--macc);color:#fdf8ee">DRV</span>'
+          +'<span class="btxt">'+mobEsc(mobAbbr(s))+'</span></div>';
+      if(mod.length&&(lv==null||lv<=1))
+        h+='<div class="bline"><span class="btag" style="border:1px solid var(--msage);color:var(--msaged)">HELD</span>'
+          +'<span class="btxt">'+mobEsc(mobAbbr(mod[0]))+'</span></div>';
+      if(!drv.length&&!(mod.length&&(lv==null||lv<=1)))
+        h+='<div class="btxt" style="color:var(--mmut)">No flagged drivers.</div>';
+      h+='</div>';}
     h+='</div>';}
   h+='</div>';
   /* selected-day weather + fuels (engine buckets: w = weather rows, f = fuels rows) */
@@ -5189,7 +5355,7 @@ function boot(){
   const tz=$("mobTabZones");if(tz)tz.onclick=()=>{MOB_TAB.v="zones";renderMob();};
   const tmp=$("mobTabMap");if(tmp)tmp.onclick=()=>{MOB_TAB.v="map";renderMob();};
   applyMode();try{maybeClimo(area());}catch(e){}
-  if(state.autoFetch&&area()&&area().lat!=null)runFetchAll(false); /* nothing to fetch until a point is resolved */
+  if(state.autoFetch&&area()&&area().lat!=null)bootRefresh(); /* v100: freshness-gated, not unconditional */
 }
 boot();
 </script>
