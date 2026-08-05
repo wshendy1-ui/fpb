@@ -325,6 +325,12 @@ body.mobOn{overflow:hidden}
 #mobRoot .mtxcell .cs{font:600 8.5px Figtree,sans-serif;opacity:.82;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 #mobRoot .mtxname{cursor:pointer}
 /* v101: horizon brackets size to their content — two drivers plus an inhibitor, wrapped */
+/* v102: links sheet */
+#mobRoot .mlnk{display:flex;gap:10px;align-items:center;padding:11px 4px;border-bottom:1px solid var(--mline2);text-decoration:none;color:inherit;min-width:0}
+#mobRoot .mlnk .lt{font-size:12.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#mobRoot .mlnk .ld{font-size:10px;color:var(--mmut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#mobRoot .mlnk .lg{margin-left:auto;flex:none;color:var(--maccd);font-size:13px;font-weight:700}
+#mobRoot .mlnk.off{opacity:.45}
 #mobRoot .mbrk{border:1px solid var(--mline2);border-radius:12px;padding:9px 10px 10px;background:var(--mnt);min-width:0;display:flex;flex-direction:column;gap:4px}
 #mobRoot .mbrk .bk{font-size:9px;letter-spacing:.14em;font-weight:700;color:var(--mmut)}
 #mobRoot .mbrk .badj{font-size:14px;font-weight:800;line-height:1.1}
@@ -816,10 +822,17 @@ const IDX_MAX={erc:1,bi:1,ic:1,sc:1,kbdi:1};   /* severity direction: daily/area
    what the fuels did. Today therefore follows the standard - the 13:00 observation is the
    day's value, and until that exists we prefer the forecast row, which is issued once and
    holds still. Ranked: 13:00 observation > forecast > partial-day observation. */
-const FEMS_D0_HOUR=13;              /* NFDRS observation hour (local) */
-const FEMS_OBS_READY_HOUR=14;       /* local hour after which today's 13:00 obs should exist */
-const FEMS_SRC_RANK={obs13:3,fcst:2,obsPartial:1};
-function femsSrcLabel(s){return s==="obs13"?"obs 13:00":s==="fcst"?"forecast":s==="obsPartial"?"partial obs":null;}
+const FEMS_D0_HOUR=13;              /* NFDRS observation hour, when a feed provides one */
+const FEMS_FREEZE_HOUR=15;          /* local hour after which today's observed value locks */
+const FEMS_SRC_RANK={obsFrozen:4,obs:3,fcst:2};
+function femsSrcLabel(s){return s==="obsFrozen"?"observed (locked)":s==="obs"?"observed":s==="fcst"?"forecast":null;}
+/* which NFDRS fuel model an entry belongs to — tagged at parse time, else read off the
+   suffixed value keys, so per-model grouping still works on legacy/hand-mapped imports */
+function femsFmOf(e){
+  if(e.fm)return String(e.fm).toUpperCase();
+  for(const k in (e.vals||{})){const m=/_([A-Z])$/.exec(k);if(m&&FM_SET.indexOf(m[1])>=0)return m[1];}
+  return "Y";
+}
 const FM_MIN={fm1:1,fm10:1,fm100:1,fm1000:1,lfm:1,lfw:1,woody:1}; /* severity direction: daily/area min */
 let LAST_IMPORT={sids:[]};
 let MIGRATE_ERR=null;
@@ -832,7 +845,7 @@ const OM_MODELS_FULL=["gfs_seamless","ecmwf_ifs025","icon_seamless","gem_seamles
 const OM_MODELS_LEAN=["gfs_seamless","ecmwf_ifs025"];
 function omModels(){return state.ensMode==="full"?OM_MODELS_FULL:OM_MODELS_LEAN;}
 function ensembleLab(){return state.ensMode==="full"?((OM_MODELS_FULL.length+1)+" · full ensemble"):((OM_MODELS_LEAN.length+1)+" · lean (GFS+ECMWF+NWS)");}
-const APP_VERSION="101"; /* PWA — bump together with sw.js CACHE on every release */
+const APP_VERSION="103"; /* PWA — bump together with sw.js CACHE on every release */
 const MAX_RAWS=5; /* v84: station cap per area — API discipline; pickers rank active-first, then nearest */
 const PDS_RE=/particularly\s+dangerous\s+situation/i; /* v84: PDS wording inside a Red Flag Warning — display only */
 /* ==================== v86: narrative pools — driven by / held in check ==================== */
@@ -1743,8 +1756,11 @@ function femsStaleReason(p,now){
   const have=p.femsBy&&p.femsBy[today]&&Object.keys(p.femsBy[today]).length;
   if(!have)return "no-row";
   /* upgrade a forecast/partial day-0 to the 13:00 observation once it should exist */
-  const best=Object.keys(src).filter(k=>k!=="__day").map(k=>FEMS_SRC_RANK[src[k]]||0).sort((a,b)=>b-a)[0]||0;
-  if(best<FEMS_SRC_RANK.obs13&&new Date(now).getHours()>=FEMS_OBS_READY_HOUR)return "obs13-due";
+  const ranks=Object.keys(src).filter(k=>k!=="__day").map(k=>FEMS_SRC_RANK[src[k]]||0);
+  const best=ranks.sort((a,b)=>b-a)[0]||0;
+  if(best>=FEMS_SRC_RANK.obsFrozen)return null;              /* locked for the day */
+  if(best<=FEMS_SRC_RANK.fcst)return "obs-due";              /* still on forecast: look for observed */
+  if(new Date(now).getHours()>=FEMS_FREEZE_HOUR)return "freeze-due"; /* one last pull, then lock */
   return null;
 }
 function wxCacheKey(pts){return pts.map(x=>(+x.lat).toFixed(3)+","+(+x.lon).toFixed(3)).join(";");}
@@ -2876,7 +2892,7 @@ function collectCsvEntries(parsed,map,srcId,forceSid,defTyp){
     }
     if(!Object.keys(vals).length)continue;
     const typ=(map.nfdrtype!=null&&c[map.nfdrtype])?String(c[map.nfdrtype]).trim().toUpperCase().slice(0,1):(defTyp||null);
-    entries.push({sid:sid,day:day,typ:typ,hour:hourFrom(c[map.date],map.time!=null?c[map.time]:null),vals:vals});
+    entries.push({sid:sid,day:day,typ:typ,fm:M,hour:hourFrom(c[map.date],map.time!=null?c[map.time]:null),vals:vals});
   }
   return entries;
 }
@@ -2895,27 +2911,35 @@ function reduceEntriesDaily(entries){
     let g=groups[k].slice();const sid=g[0].sid,day=g[0].day;
     /* v89: FEMS table exports mix observed (O) and forecast (F) rows in one file — when a
        date carries both, the observation wins outright. API pulls are homogeneous per call. */
-    /* v100: today only — no max across a growing set of hours. This runs BEFORE the v89
-       O-beats-F filter, because before 13:00 the forecast row is the one we want and the
-       v89 rule would have discarded it. */
+    /* v103: observation wins the same date (v89). On TODAY the choice is made per fuel
+       model — the export carries one row per (day, model) and collapsing them would drop
+       every model but one, which is exactly how a zone ended up reading its V-grass number
+       under a Y-timber rating. Observation is preferred; forecast is the fallback when
+       today has no observation rows yet. */
     const isToday=(day===genDays()[0]);
     let d0src=null;
     if(!isToday){
       if(g.some(e=>e.typ==="O")&&g.some(e=>e.typ==="F"))g=g.filter(e=>e.typ!=="F");
-    }
-    if(isToday){
-      const obs=g.filter(e=>e.typ!=="F");
-      const at13=obs.filter(e=>e.hour!=null&&e.hour>=FEMS_D0_HOUR);
-      if(at13.length){
-        at13.sort((a,b)=>Math.abs(a.hour-FEMS_D0_HOUR)-Math.abs(b.hour-FEMS_D0_HOUR));
-        g=[at13[0]];d0src="obs13";
-      }else if(g.some(e=>e.typ==="F")){
-        g=g.filter(e=>e.typ==="F");d0src="fcst";
-      }else{
-        /* only partial-day observations exist: take the latest single hour, never the max */
-        const part=obs.slice().sort((a,b)=>((b.hour==null?-1:b.hour)-(a.hour==null?-1:a.hour)));
-        if(part.length){g=[part[0]];d0src="obsPartial";}
+    }else{
+      const byFm={};
+      for(const e of g){const m=femsFmOf(e);(byFm[m]=byFm[m]||[]).push(e);}
+      const keep=[];
+      for(const m in byFm){
+        const set=byFm[m];
+        const obs=set.filter(e=>e.typ!=="F");
+        const use=obs.length?obs:set.filter(e=>e.typ==="F");
+        if(!use.length)continue;
+        /* if a feed ever does give us hours, take the one nearest 13:00; otherwise the
+           single daily row is all there is */
+        const hrs=use.filter(e=>e.hour!=null);
+        if(hrs.length>1){
+          hrs.sort((a,b)=>Math.abs(a.hour-FEMS_D0_HOUR)-Math.abs(b.hour-FEMS_D0_HOUR));
+          keep.push(hrs[0]);
+        }else keep.push(use[0]);
+        if(obs.length)d0src=d0src||"obs";
       }
+      if(keep.length)g=keep;
+      if(!d0src)d0src="fcst";
     }
     g.sort((a,b)=>{ /* nearest-13:00 first: only matters for direction-less fields */
       const ah=a.hour==null?99:Math.abs(a.hour-13),bh=b.hour==null?99:Math.abs(b.hour-13);
@@ -2956,13 +2980,19 @@ function storeFemsRows(entries){
     /* v100: on today, a partial-obs or forecast pull must not displace a better source that
        is already stored — otherwise the two dataset calls fight each other every refresh. */
     if(r.day===today&&r.src){
-      const prevSrc=(p.femsSrcBy[today]||{})[r.sid];
       const prevDay=(p.femsSrcBy[today]||{}).__day;
-      const stale=(prevDay&&prevDay!==today);
-      if(!stale&&prevSrc&&(FEMS_SRC_RANK[prevSrc]||0)>(FEMS_SRC_RANK[r.src]||0)){w[r.sid]=1;continue;}
+      if(prevDay&&prevDay!==today)p.femsSrcBy[today]={};
+      const prevSrc=(p.femsSrcBy[today]||{})[r.sid];
+      /* v103 (D): today's observed value may be revised until the cutoff, then it locks.
+         These are date-only daily aggregates that FEMS grows through the day, so without a
+         lock the rating climbs all afternoon on bookkeeping rather than on fuels. */
+      if(prevSrc==="obsFrozen"){w[r.sid]=1;continue;}
+      let src=r.src;
+      if(src==="obs"&&new Date().getHours()>=FEMS_FREEZE_HOUR)src="obsFrozen";
+      if(prevSrc&&(FEMS_SRC_RANK[prevSrc]||0)>(FEMS_SRC_RANK[src]||0)){w[r.sid]=1;continue;}
       p.femsSrcBy[today]=p.femsSrcBy[today]||{};
       p.femsSrcBy[today].__day=today;
-      p.femsSrcBy[today][r.sid]=r.src;
+      p.femsSrcBy[today][r.sid]=src;
     }
     const tgt=dayo[r.sid]=dayo[r.sid]||{};
     for(const f in r.vals)tgt[f]=Math.round(r.vals[f]*10)/10;
@@ -3044,7 +3074,7 @@ function importFemsJson(j,opts){
       if(best)vals[def.f]=best.v;
     }
     if(!Object.keys(vals).length)continue;
-    entries.push({sid:sid,day:day,typ:opts.typ||null,hour:hourFrom(dRaw,r.time||r.nfdrTime||null),vals:vals});
+    entries.push({sid:sid,day:day,typ:opts.typ||null,fm:"Y",hour:hourFrom(dRaw,r.time||r.nfdrTime||null),vals:vals});
   }
   return storeFemsRows(entries);
 }
@@ -3885,6 +3915,7 @@ function renderMob(){
     +'<div style="display:flex;gap:6px;align-items:center;margin-top:8px;flex-wrap:wrap">'
     +'<span class="mpill">'+mobEsc(zid)+'</span>'
     +'<span class="mpill">FM '+mobEsc((p&&p.fuelModel)||"Y")+'</span>'
+    +'<button class="mpill" id="mobLinksBtn" style="color:var(--maccd);border-color:var(--macc)">Links \u2197</button>'
     +'<button class="mpill" id="mobRefresh" style="color:var(--maccd);border-color:var(--macc)">'
     +(MOB_BUSY?'<i style="display:inline-block;width:9px;height:9px;border:2px solid rgba(128,100,60,.25);border-top-color:var(--macc);border-radius:50%;animation:mspn .7s linear infinite;vertical-align:-1px"></i> ':'\u21bb ')
     +mobEsc(issued)+'</button></div></div>'
@@ -3986,6 +4017,7 @@ function renderMob(){
   const rf=$("mobRefresh");if(rf)rf.onclick=async()=>{if(MOB_BUSY)return;MOB_BUSY=true;renderMob();
     try{await runFetchAll(true);}catch(e){}MOB_BUSY=false;renderMob();};
   const dt=$("mobDetail");if(dt)dt.onclick=()=>mobSheetOpen();
+  const lk=$("mobLinksBtn");if(lk)lk.onclick=()=>mobLinksOpen();
   const st=$("mobStrip");if(st)st.querySelectorAll("button[data-i]").forEach(b=>b.onclick=()=>{
     state.ui=state.ui||{};state.ui.selDay=+b.dataset.i;try{renderAll();}catch(e){renderMob();}});
 }
@@ -4350,6 +4382,80 @@ function mobMatWire(root){
     const d=root.querySelector('.mtxdesc[data-desc="'+nm.dataset.descFor+'"]');if(d)d.hidden=!d.hidden;});
   root.querySelectorAll(".mtxcell[data-i]").forEach(b=>b.onclick=()=>{
     state.ui=state.ui||{};state.ui.selDay=+b.dataset.i;mobSheetOpen();});}
+/* v102: one definition of the link set, context-built from the current zone. Grouped the
+   way the desktop groups them; entries that need a resolved point say so instead of
+   silently going to a generic landing page. */
+function mobLinkSet(){
+  const p=area()||{};
+  const zid=zidOf(p);
+  const hp=(wxPointsSel(p)||[])[0];
+  const wfo=(p.nwsWfo||"").trim().toLowerCase();
+  const stns=(p.stations||[]).filter(s=>s.sel);
+  const G=[];
+  /* --- this zone --- */
+  const here=[];
+  if(hp&&hp.lat!=null){
+    const hl=(Math.round(hp.lat*2)/2).toFixed(1),ho=(Math.round(hp.lon*2)/2).toFixed(1);
+    here.push({t:"HDW GEFS plot",d:"point plot at "+hl+", "+ho,
+      u:(state.hdwUrl||HDW_PLOT_DEF).replace(/\{lat\}/g,hl).replace(/\{lon\}/g,ho)});
+  }else here.push({t:"HDW GEFS plot",d:"resolve a point first",u:null});
+  here.push({t:"NWS fire weather",d:wfo?("WRH \u00b7 "+wfo.toUpperCase()+" office"):"WRH \u2014 resolve a point to target your office",
+    u:"https://www.weather.gov/wrh/fire"+(wfo?("?wfo="+encodeURIComponent(wfo)):"")});
+  if(zid)here.push({t:"NWS zone forecast",d:zid,u:"https://forecast.weather.gov/MapClick.php?zoneid="+encodeURIComponent(zid)});
+  here.push({t:"NWS alerts",d:"active watches and warnings",u:"https://www.weather.gov/alerts"});
+  G.push(["This zone",here]);
+  /* --- fuels --- */
+  const fuels=[];
+  if(stns.length){
+    fuels.push({t:"FEMS observed CSV",d:stns.length+" station"+(stns.length===1?"":"s")+" \u00b7 last 3 days",u:femsUrlFor("observation")});
+    fuels.push({t:"FEMS forecast CSV",d:stns.length+" station"+(stns.length===1?"":"s")+" \u00b7 7 days",u:femsUrlFor("forecast")});
+  }else{
+    fuels.push({t:"FEMS observed CSV",d:"select stations first",u:null});
+    fuels.push({t:"FEMS forecast CSV",d:"select stations first",u:null});
+  }
+  fuels.push({t:"FEMS",d:"fems.fs2c.usda.gov",u:"https://fems.fs2c.usda.gov/"});
+  fuels.push({t:"Region 6 NFDRS",d:"PNW fire danger planning",u:"https://pnwwildfireplanning.pythonanywhere.com/nfdrs/"});
+  fuels.push({t:"BMIDC fuels",d:"Blue Mountain fire danger",u:"https://bmidc.org/firedngr.shtml"});
+  fuels.push({t:"WFAS",d:"national fuel and fire danger maps",u:"https://www.wfas.net/"});
+  G.push(["Fuels & fire danger",fuels]);
+  /* --- outlooks --- */
+  G.push(["Outlooks",[
+    {t:"SPC fire weather outlook",d:"day 1\u20138 convective/fire",u:"https://www.spc.noaa.gov/products/fire_wx/"},
+    {t:"HDWI",d:"hot-dry-windy index site",u:"https://hdwindex.fs2c.usda.gov/"},
+    {t:"CPC 6\u201310 day",d:"temperature and precip outlook",u:"https://www.cpc.ncep.noaa.gov/products/predictions/610day/"},
+    {t:"CPC 8\u201314 day",d:"temperature and precip outlook",u:"https://www.cpc.ncep.noaa.gov/products/predictions/814day/"},
+    {t:"NWCC 7-day potential",d:"Northwest significant fire potential",u:"https://gacc.nifc.gov/nwcc/predict/outlook.aspx"}
+  ]]);
+  /* --- situation --- */
+  G.push(["Situation",[
+    {t:"NWCC situation report",d:"Northwest GACC",u:"https://gacc.nifc.gov/nwcc/information/sitreport.aspx"},
+    {t:"National IMSR",d:"incident management situation report",u:"https://www.nifc.gov/nicc/incident-information/imsr"},
+    {t:"BMIDC intel",d:"Blue Mountain interagency intel",u:"https://bmidc.org/intel.shtml"}
+  ]]);
+  return G;
+}
+function mobLinksOpen(){
+  const sh=$("mobSheet"),inn=$("mobSheetIn");if(!sh||!inn)return;
+  const p=area();
+  let h='<div style="display:flex;justify-content:space-between;align-items:baseline">'
+    +'<div style="font:400 20px Caprasimo,serif">Links</div>'
+    +'<button id="mobSheetX" style="border:none;background:none;font:700 13px Figtree,sans-serif;color:var(--maccd);cursor:pointer;padding:4px 6px">Close \u2715</button></div>'
+    +'<div class="mnote" style="margin-bottom:6px">Opens in a new tab \u00b7 built for '
+    +mobEsc((p&&(p.fdraName||p.name))||"no zone")+'</div>';
+  for(const [grp,items] of mobLinkSet()){
+    h+='<div class="sgrp">'+mobEsc(grp)+'</div>';
+    for(const it of items){
+      const dead=!it.u;
+      h+=dead
+        ?'<div class="mlnk off"><div style="min-width:0;flex:1"><div class="lt">'+mobEsc(it.t)+'</div><div class="ld">'+mobEsc(it.d)+'</div></div></div>'
+        :'<a class="mlnk" href="'+mobEsc(it.u)+'" target="_blank" rel="noopener"><div style="min-width:0;flex:1">'
+          +'<div class="lt">'+mobEsc(it.t)+'</div><div class="ld">'+mobEsc(it.d)+'</div></div><span class="lg">\u2197</span></a>';
+    }
+  }
+  inn.innerHTML=h;sh.classList.add("on");
+  $("mobSheetX").onclick=()=>sh.classList.remove("on");
+  sh.onclick=e=>{if(e.target===sh)sh.classList.remove("on");};
+}
 function mobSheetOpen(){
   const sh=$("mobSheet"),inn=$("mobSheetIn");if(!sh||!inn)return;
   const si=mobSel();const days=mobDays();const lv0=days[si]?adjLevel(days[si].score):null;
