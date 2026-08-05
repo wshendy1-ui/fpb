@@ -250,6 +250,32 @@ a.smallbtn{text-decoration:none;color:var(--ink);display:inline-block}
 body.mobOn header.mast,body.mobOn main.wrap{display:none!important}
 body.mobOn{background:#f5ead8}
 body.mobOn #mobRoot{display:flex}
+/* v104: dark palette — surfaces and ink only; the severity tiers keep their colours so a
+   rating never means something different because of the time of day */
+#mobRoot.dark{
+  --mbg:#17150f;--msur:#211e17;--mline:rgba(240,230,208,.18);--mline2:rgba(240,230,208,.10);
+  --mmut:#9c9078;--mlab:#cabfa6;--macc:#d2823f;--maccd:#e8a463;--msage:#8b9c68;--msaged:#a8ba82;
+  --mnt:#1c1a14;--m2ink:#ffe9a8;--mshc:0 2px 12px rgba(0,0,0,.45)}
+body.mobOn.dark{background:#17150f}
+#mobRoot.dark #mobTabs{background:rgba(33,30,23,.94)}
+#mobRoot.dark .mzsearch,#mobRoot.dark .mzstate,#mobRoot.dark .mnum{background:#1c1a14;color:var(--mlab)}
+#mobRoot.dark #mobMap{background:#221f19}
+/* v104: tab bar icons */
+#mobTabs button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
+#mobTabs button svg{width:17px;height:17px;display:block}
+#mobTabs .tlab{font-size:9.5px;letter-spacing:.02em;line-height:1}
+/* v104: favourites strip on the Brief */
+#mobFav{display:flex;gap:6px;overflow-x:auto;overscroll-behavior-x:contain;padding:2px 0 2px;scrollbar-width:none}
+#mobFav::-webkit-scrollbar{display:none}
+#mobRoot .mfav{flex:none;display:flex;align-items:center;gap:5px;border:1px solid var(--mline);border-radius:999px;
+  padding:6px 11px;background:var(--msur);color:var(--mlab);font:700 11px ui-monospace,Menlo,monospace;cursor:pointer;touch-action:manipulation}
+#mobRoot .mfav.on{background:var(--macc);border-color:var(--macc);color:#fdf8ee}
+#mobRoot .mfav svg{width:11px;height:11px;flex:none}
+/* v104: settings sheet controls */
+#mobRoot .mseg3{display:flex;gap:6px}
+#mobRoot .mseg3 button{flex:1;border:1px solid var(--mline);border-radius:11px;padding:9px 4px;background:none;
+  font:700 11.5px Figtree,sans-serif;color:var(--mlab);cursor:pointer}
+#mobRoot .mseg3 button.on{background:var(--macc);border-color:var(--macc);color:#fdf8ee}
 #mobRoot{position:fixed;inset:0;z-index:40;flex-direction:column;background:#f5ead8;color:#201e1d;
   font:13px/1.45 Figtree,system-ui,sans-serif;
   --mbg:#f5ead8;--msur:#fdf8ee;--mline:rgba(72,58,38,.16);--mline2:rgba(72,58,38,.09);
@@ -348,6 +374,7 @@ body.mobOn{overflow:hidden}
 #mobRoot .mzrow .zid{font:700 11px ui-monospace,Menlo,monospace;color:var(--mlab)}
 #mobRoot .mzrow .znm{font-size:11.5px;color:var(--mmut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #mobRoot .mzpin{flex:none;border:none;background:none;font-size:14px;line-height:1;padding:6px;cursor:pointer;color:var(--macc)}
+#mobRoot .mzpin svg{width:14px;height:14px;display:block}
 #mobRoot .mzsearch,#mobRoot .mzstate{width:100%;border:1px solid var(--mline);border-radius:12px;padding:10px 12px;font:600 12.5px Figtree,sans-serif;background:var(--msur);color:inherit;-webkit-appearance:none}
 #mobRoot .mzwin{display:flex;flex-direction:column;gap:7px;max-height:430px;overflow-y:auto;overscroll-behavior-y:contain;padding-right:2px}
 /* v96: setup & calibration panel */
@@ -392,11 +419,11 @@ body.mobOn{overflow:hidden}
   <div id="mobScroll"></div>
   <div id="mobSheet"><div id="mobSheetIn"></div></div>
   <div id="mobTabs">
-    <button id="mobTabBrief" class="on">Brief</button>
-    <button id="mobTabMatrix">Matrix</button>
-    <button id="mobTabMap">Map</button>
-    <button id="mobTabZones">Zones</button>
-    <button id="mobTabFull" title="Switch to the full desktop dashboard">Full</button>
+    <button id="mobTabBrief" class="on"></button>
+    <button id="mobTabMatrix"></button>
+    <button id="mobTabMap"></button>
+    <button id="mobTabZones"></button>
+    <button id="mobTabMore" title="Settings"></button>
   </div>
 </div>
 <header class="mast">
@@ -845,7 +872,7 @@ const OM_MODELS_FULL=["gfs_seamless","ecmwf_ifs025","icon_seamless","gem_seamles
 const OM_MODELS_LEAN=["gfs_seamless","ecmwf_ifs025"];
 function omModels(){return state.ensMode==="full"?OM_MODELS_FULL:OM_MODELS_LEAN;}
 function ensembleLab(){return state.ensMode==="full"?((OM_MODELS_FULL.length+1)+" · full ensemble"):((OM_MODELS_LEAN.length+1)+" · lean (GFS+ECMWF+NWS)");}
-const APP_VERSION="103"; /* PWA — bump together with sw.js CACHE on every release */
+const APP_VERSION="104"; /* PWA — bump together with sw.js CACHE on every release */
 const MAX_RAWS=5; /* v84: station cap per area — API discipline; pickers rank active-first, then nearest */
 const PDS_RE=/particularly\s+dangerous\s+situation/i; /* v84: PDS wording inside a Red Flag Warning — display only */
 /* ==================== v86: narrative pools — driven by / held in check ==================== */
@@ -1465,6 +1492,8 @@ function area(){return state.areas[state.areaId]||Object.values(state.areas)[0];
 function migrate(){
   if(!state.uiMode)state.uiMode="auto"; /* v91: auto | desktop | mobile */
   if(!Array.isArray(state.mobPins))state.mobPins=[]; /* v93: pinned mobile zones */
+  if(state.mobPins.length>MOB_PIN_MAX)state.mobPins=state.mobPins.slice(0,MOB_PIN_MAX); /* v104 cap */
+  if(!state.theme)state.theme="auto"; /* v104: auto | light | dark */
   state.fuelsToday=Object.assign({erc:"",bi:"",ic:"",fm100:"",fm1000:"",lfm:"",lfw:"",kbdi:""},state.fuelsToday||{});
   /* v90: values from before date-stamping are from an unknown earlier day — they stay visible in the
      inputs but no longer auto-apply; say why day 0 just changed, once. */
@@ -3774,6 +3803,47 @@ setInterval(renderDataAge,5*60*1000); /* keep the age honest while the tab sits 
 
 /* ===================== v91 MOBILE MODE + FPB CLIMO AUTO-NORMALS ===================== */
 const MOB_BP=700;let MOB_MQ=null,MOB_BUSY=false;const CLIMO_TRIED={};
+const MOB_PIN_MAX=10;   /* favourites cap */
+/* v104: tab icons — lucide-style 24px strokes, drawn to match the alert glyph already used
+   on the Brief. Kept inline so the shell stays a single self-contained file. */
+const MOB_SVG=(p)=>'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+p+'</svg>';
+const MOB_ICON={
+  brief:MOB_SVG('<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5"></path>'),
+  matrix:MOB_SVG('<rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M9 3v18M15 3v18M3 9h18M3 15h18"></path>'),
+  map:MOB_SVG('<path d="M14.106 5.553a2 2 0 0 0 1.788 0l3.659-1.83A1 1 0 0 1 21 4.619v12.764a1 1 0 0 1-.553.894l-4.553 2.277a2 2 0 0 1-1.788 0l-4.212-2.106a2 2 0 0 0-1.788 0l-3.659 1.83A1 1 0 0 1 3 19.382V6.618a1 1 0 0 1 .553-.894l4.553-2.277a2 2 0 0 1 1.788 0z"></path><path d="M15 5.764v15M9 3.236v15"></path>'),
+  zones:MOB_SVG('<path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0"></path><circle cx="12" cy="10" r="3"></circle>'),
+  more:MOB_SVG('<circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle><circle cx="5" cy="12" r="1"></circle>'),
+  home:MOB_SVG('<path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"></path><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>'),
+  star:MOB_SVG('<path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.12 2.12 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.12 2.12 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.12 2.12 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.12 2.12 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.12 2.12 0 0 0 1.597-1.16z"></path>')
+};
+/* v104: theme. auto follows the device; the choice persists with everything else. */
+function themeMode(){return state.theme||"auto";}
+function themeIsDark(){
+  const m=themeMode();
+  if(m==="dark")return true;
+  if(m==="light")return false;
+  try{return !!(window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches);}catch(e){return false;}
+}
+function applyTheme(){
+  const dark=themeIsDark()&&mobActive();
+  const r=$("mobRoot");if(r)r.classList.toggle("dark",dark);
+  document.body.classList.toggle("dark",dark);
+}
+function setTheme(m){state.theme=m;persist();applyTheme();renderMob();}
+/* v104: page zoom stays off outside the map. touch-action alone does not stop pinch on iOS
+   Safari, so the viewport is locked while mobile mode is on and restored on the way out. */
+const MOB_VP_DEF="width=device-width,initial-scale=1";
+const MOB_VP_LOCK="width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,user-scalable=no,viewport-fit=cover";
+function mobViewportLock(on){
+  let m=document.querySelector('meta[name="viewport"]');
+  if(!m){m=document.createElement("meta");m.name="viewport";document.head.appendChild(m);}
+  m.setAttribute("content",on?MOB_VP_LOCK:MOB_VP_DEF);
+}
+function mobInMap(t){for(let e=t;e;e=e.parentElement)if(e.id==="mobMap")return true;return false;}
+["gesturestart","gesturechange","gestureend"].forEach(ev=>{
+  document.addEventListener(ev,e=>{if(mobActive()&&!mobInMap(e.target))e.preventDefault();},{passive:false});
+});
+document.addEventListener("dblclick",e=>{if(mobActive()&&!mobInMap(e.target))e.preventDefault();},{passive:false});
 const CLIMO_URLS=[z=>"../climo/"+z+".json",z=>"https://raw.githubusercontent.com/wshendy1-ui/fpb/main/climo/"+z+".json"];
 /* v92: Brief shows a fixed, curated set; everything else lives in the Matrix tab */
 const MOB_WX_IDS=["tmax","rhmin","rhrec","wind","gust","precip","pop","dryltg"];
@@ -3838,7 +3908,8 @@ function mobAuto(){try{if(!MOB_MQ&&window.matchMedia){MOB_MQ=window.matchMedia("
   const h=()=>applyMode();if(MOB_MQ.addEventListener)MOB_MQ.addEventListener("change",h);else if(MOB_MQ.addListener)MOB_MQ.addListener(h);}
   return MOB_MQ?!!MOB_MQ.matches:false;}catch(e){return false;}}
 function mobActive(){const m=state.uiMode||"auto";return m==="mobile"||(m==="auto"&&mobAuto());}
-function applyMode(){const on=mobActive();document.body.classList.toggle("mobOn",on);if(on)renderMob();}
+function applyMode(){const on=mobActive();document.body.classList.toggle("mobOn",on);
+  mobViewportLock(on);applyTheme();if(on)renderMob();}
 /* zone id for climo lookup: FWZ areas store it in fdraKey ("fwz:ORZ693"); older areas carry it as the area id */
 function zidOf(p){if(!p)return null;
   const m=/^fwz:([A-Za-z]{2}Z\d{3})$/i.exec(p.fdraKey||"");if(m)return m[1].toUpperCase();
@@ -3888,11 +3959,18 @@ function mobCellHtml(r,i,withSub){
   const cv=r.val(i);if(cv.v==null&&cv.txt==null)return "";
   const lv=r.sev(i,cv.v);
   return mobCellRaw(mobName(r),cv.txt!=null?cv.txt:cv.v,mobUn(r),lv,withSub?cv.sub:null,withSub==="inline");}
-function mobTabsSync(){const b=$("mobTabBrief"),m=$("mobTabMatrix"),z=$("mobTabZones"),mp=$("mobTabMap");
-  if(b)b.classList.toggle("on",MOB_TAB.v==="brief");
-  if(m)m.classList.toggle("on",MOB_TAB.v==="matrix");
-  if(z)z.classList.toggle("on",MOB_TAB.v==="zones");
-  if(mp)mp.classList.toggle("on",MOB_TAB.v==="map");}
+function mobTabsSync(){
+  const defs=[["mobTabBrief","brief","Brief",MOB_ICON.brief],
+              ["mobTabMatrix","matrix","Matrix",MOB_ICON.matrix],
+              ["mobTabMap","map","Map",MOB_ICON.map],
+              ["mobTabZones","zones","Zones",MOB_ICON.zones],
+              ["mobTabMore",null,"More",MOB_ICON.more]];
+  for(const [id,tab,lab,ico] of defs){
+    const el=$(id);if(!el)continue;
+    if(el.dataset.painted!=="1"){el.innerHTML=ico+'<span class="tlab">'+lab+'</span>';el.dataset.painted="1";}
+    el.classList.toggle("on",tab!=null&&MOB_TAB.v===tab);
+  }
+}
 function renderMob(){
   const root=$("mobScroll");if(!root)return;
   mobTabsSync();
@@ -3920,28 +3998,37 @@ function renderMob(){
     +(MOB_BUSY?'<i style="display:inline-block;width:9px;height:9px;border:2px solid rgba(128,100,60,.25);border-top-color:var(--macc);border-radius:50%;animation:mspn .7s linear infinite;vertical-align:-1px"></i> ':'\u21bb ')
     +mobEsc(issued)+'</button></div></div>'
     +'<style>@keyframes mspn{to{transform:rotate(360deg)}}</style>';
+  /* v104: favourites — switch zones without leaving the briefing */
+  h+=mobFavHtml();
   /* alert row */
-  const rfw=has&&fx.d&&fx.d[fx.days[0]]?fx.d[fx.days[0]].rfw:null;
+  const rfw=has&&fx.d&&fx.d[fx.days[si]]?fx.d[fx.days[si]].rfw:null;
   const an=fx.alertNow;
-  const pds=(rfw&&/PDS/.test(rfw))||(an&&an.pds);
+  const pds=(rfw&&/PDS/.test(rfw))||(si===0&&an&&an.pds);
   const albg=rfw?(pds||/RFW/.test(rfw)?"var(--m4t)":"var(--m2t)"):"var(--mnt)";
   const alink=rfw?(pds||/RFW/.test(rfw)?"#7a1d14":"var(--m2ink)"):"var(--msaged)";
   h+='<div id="mobAlert" style="background:'+albg+';color:'+alink+'">'
     +'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round" style="width:17px;height:17px;flex:none"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>'
     +'<div style="min-width:0"><div style="font-weight:700;font-size:12.5px">'
-    +mobEsc(rfw?(an&&an.ev?an.ev:rfw)+" in effect today":"No fire weather headlines for this zone")+'</div></div>'
+    +mobEsc(rfw?((an&&an.ev&&si===0?an.ev:rfw)+(si===0?" in effect today":" \u2014 "+dayLabel(si).dn+" "+dayLabel(si).dd))
+      :(si===0?"No fire weather headlines for this zone":"No headlines for "+dayLabel(si).dn+" "+dayLabel(si).dd))+'</div></div>'
     +(pds?'<span style="margin-left:auto;font:800 9.5px Figtree,sans-serif;letter-spacing:.05em;background:#7b1fa2;color:#fff;border-radius:999px;padding:3px 8px;flex:none">PDS</span>':'')
     +'</div>';
-  /* today hero */
-  const drv=has?horizonDrivers([0],days):[];
-  const mods=(has&&t0!=null&&t0<=1)?horizonModerators([0],days):[];
-  h+='<div class="mcard"><div style="display:flex;justify-content:space-between;align-items:baseline">'
-    +'<div class="mkick">Today — significant fire potential</div>'
-    +'<span style="font:600 10.5px ui-monospace,Menlo,monospace;color:var(--mmut)">'+mobEsc(has?fx.days[0].slice(5):"")+'</span></div>'
+  /* v104: the hero follows the selected day. Reading a Thursday rating under a heading
+     that says "Today" is the kind of small mislabel that becomes a bad decision at 0600. */
+  const hd=has?days[si]:null;
+  const ht=hd?adjLevel(hd.score):null;
+  const hL=has?dayLabel(si):{dn:"",dd:""};
+  const isToday=(si===0);
+  const drv=has?horizonDrivers([si],days):[];
+  const mods=(has&&ht!=null&&ht<=1)?horizonModerators([si],days):[];
+  h+='<div class="mcard"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">'
+    +'<div class="mkick" style="min-width:0">'+mobEsc(isToday?"Today":(hL.dn+" "+hL.dd))+' \u2014 significant fire potential</div>'
+    +'<span style="font:600 10.5px ui-monospace,Menlo,monospace;color:var(--mmut);white-space:nowrap">'
+    +mobEsc(has?fx.days[si].slice(5):"")+(isToday?"":" \u00b7 day "+(si+1))+'</span></div>'
     +'<div style="display:flex;align-items:center;gap:14px;margin-top:8px">'
-    +'<div class="mhero" style="color:'+(t0==null?"var(--mmut)":mobLv(t0))+'">'+(t0==null?"NO DATA":ADJ[t0])+'</div>'
-    +'<div style="margin-left:auto;text-align:right"><div class="mmono">'+(d0&&d0.score!=null?d0.score.toFixed(2):"—")+'</div>'
-    +'<div style="font-size:9.5px;color:var(--mmut);letter-spacing:.06em;font-weight:700">COMPOSITE 0–4</div></div></div>'
+    +'<div class="mhero" style="color:'+(ht==null?"var(--mmut)":mobLv(ht))+'">'+(ht==null?"NO DATA":ADJ[ht])+'</div>'
+    +'<div style="margin-left:auto;text-align:right"><div class="mmono">'+(hd&&hd.score!=null?hd.score.toFixed(2):"\u2014")+'</div>'
+    +'<div style="font-size:9.5px;color:var(--mmut);letter-spacing:.06em;font-weight:700">COMPOSITE 0\u20134</div></div></div>'
     +'<div style="display:flex;flex-direction:column;gap:6px;margin-top:12px;border-top:1px solid var(--mline2);padding-top:10px">';
   if(drv.length)for(const s of drv)h+='<div style="display:flex;gap:8px;align-items:baseline">'
     +'<span class="mtag" style="background:var(--macc)">DRIVER</span>'
@@ -3950,6 +4037,7 @@ function renderMob(){
   if(mods.length)h+='<div style="display:flex;gap:8px;align-items:baseline">'
     +'<span class="mtag" style="background:none;border:1px solid var(--msage);color:var(--msaged)">HELD IN CHECK BY</span>'
     +'<span style="font-weight:600;font-size:12px;color:var(--mlab)">'+mobEsc(mods[0])+'</span></div>';
+  if(!isToday)h+='<div style="font-size:10.5px;color:var(--mmut);margin-top:4px">Tap Today in the strip below to come back.</div>';
   h+='</div></div>';
   /* 7-day strip + brackets */
   h+='<div class="mcard"><div class="mkick" style="margin-bottom:9px">7-day potential</div><div id="mobStrip">';
@@ -4018,6 +4106,10 @@ function renderMob(){
     try{await runFetchAll(true);}catch(e){}MOB_BUSY=false;renderMob();};
   const dt=$("mobDetail");if(dt)dt.onclick=()=>mobSheetOpen();
   const lk=$("mobLinksBtn");if(lk)lk.onclick=()=>mobLinksOpen();
+  root.querySelectorAll("[data-fav]").forEach(b=>b.onclick=()=>{
+    const z=b.dataset.fav;
+    if(z===zidOf(area()))return;
+    mobZoneGo(z);});
   const st=$("mobStrip");if(st)st.querySelectorAll("button[data-i]").forEach(b=>b.onclick=()=>{
     state.ui=state.ui||{};state.ui.selDay=+b.dataset.i;try{renderAll();}catch(e){renderMob();}});
 }
@@ -4256,19 +4348,47 @@ function mobPins(){if(!Array.isArray(state.mobPins))state.mobPins=[];
   if(!state.mobPins.length){const z=zidOf(area());if(z)state.mobPins=[z];}
   return state.mobPins;}
 function mobPinToggle(id){const p=mobPins();const i=p.indexOf(id);
-  if(i>=0)p.splice(i,1);else p.push(id);persist();renderMob();}
+  if(i>=0)p.splice(i,1);
+  else{
+    if(p.length>=MOB_PIN_MAX){toast("Favourites are capped at "+MOB_PIN_MAX+" \u2014 unpin one first");return;}
+    p.push(id);
+  }
+  persist();renderMob();}
+/* v104: home zone — the one you come back to */
+function homeZone(){return state.homeZone||null;}
+function setHomeZone(id){
+  state.homeZone=id||null;
+  if(id){const p=mobPins();if(p.indexOf(id)<0&&p.length<MOB_PIN_MAX)p.unshift(id);}
+  persist();renderMob();
+  toast(id?("Home zone set to "+id):"Home zone cleared");
+}
+function mobFavHtml(){
+  const pins=mobPins().slice(0,MOB_PIN_MAX);
+  const home=homeZone();
+  const cur=zidOf(area());
+  const ordered=pins.slice().sort((a,b)=>(a===home?-1:0)-(b===home?-1:0));
+  if(!ordered.length)return "";
+  let h='<div id="mobFav">';
+  for(const z of ordered){
+    h+='<button class="mfav'+(z===cur?" on":"")+'" data-fav="'+mobEsc(z)+'">'
+      +(z===home?MOB_ICON.home:"")+mobEsc(z)+'</button>';
+  }
+  h+='</div>';
+  return h;}
 function mobZoneGo(id){
   try{fwzPick(id);}catch(e){}
   const b=$("ptUseBtn");
   if(b&&b.onclick){MOB_TAB.v="brief";renderMob();b.onclick();}
   else toast("Zone selected \u2014 open the Full view and press Resolve");}
 function mobZoneRow(z,pinned){
+  const isHome=homeZone()===z[0];
   const cur=zidOf(area())===z[0];
   return '<div class="mzrow'+(cur?" on":"")+'">'
     +'<button class="mzgo" data-go="'+mobEsc(z[0])+'">'
     +'<span style="min-width:0;flex:1"><span class="zid">'+mobEsc(z[0])+'</span>'
     +(cur?' <span style="font:800 8px Figtree,sans-serif;color:var(--maccd);letter-spacing:.06em">CURRENT</span>':'')
     +'<span class="znm" style="display:block">'+mobEsc(z[1])+'</span></span></button>'
+    +'<button class="mzpin" data-home="'+mobEsc(z[0])+'" title="'+(isHome?"Home zone":"Set as home")+'" style="opacity:'+(isHome?"1":".35")+'">'+MOB_ICON.home+'</button>'
     +'<button class="mzpin" data-pin="'+mobEsc(z[0])+'" title="'+(pinned?"Unpin":"Pin")+'">'+(pinned?"\u2605":"\u2606")+'</button></div>';}
 function renderMobZones(root){
   const pins=mobPins();
@@ -4306,6 +4426,7 @@ function renderMobZones(root){
   const si=$("mobZst");if(si)si.onchange=()=>{MOB_Z.st=si.value;renderMob();};
   root.querySelectorAll("[data-go]").forEach(b=>b.onclick=()=>mobZoneGo(b.dataset.go));
   root.querySelectorAll("[data-pin]").forEach(b=>b.onclick=()=>mobPinToggle(b.dataset.pin));
+  root.querySelectorAll("[data-home]").forEach(b=>b.onclick=()=>setHomeZone(homeZone()===b.dataset.home?null:b.dataset.home));
   const sb=$("mobStnBtn");if(sb)sb.onclick=()=>{MOB_STN.cands=null;MOB_STN.err=null;mobStnSheet();};
   const ap=$("mobHdwApply");
   if(ap)ap.onclick=()=>{
@@ -4433,6 +4554,52 @@ function mobLinkSet(){
     {t:"BMIDC intel",d:"Blue Mountain interagency intel",u:"https://bmidc.org/intel.shtml"}
   ]]);
   return G;
+}
+/* v104: settings. Theme, home zone, the way back to the desktop view, and the honest
+   version/vintage line — the things that used to have nowhere to live on mobile. */
+function mobMoreOpen(){
+  const sh=$("mobSheet"),inn=$("mobSheetIn");if(!sh||!inn)return;
+  const p=area();const zid=zidOf(p);const home=homeZone();const m=themeMode();
+  const pins=mobPins();
+  const age=(state.wxCache&&state.wxCache.at)?Math.round((Date.now()-state.wxCache.at)/60000):null;
+  let h='<div style="display:flex;justify-content:space-between;align-items:baseline">'
+    +'<div style="font:400 20px Caprasimo,serif">Settings</div>'
+    +'<button id="mobSheetX" style="border:none;background:none;font:700 13px Figtree,sans-serif;color:var(--maccd);cursor:pointer;padding:4px 6px">Close \u2715</button></div>';
+  h+='<div class="sgrp">Appearance</div>'
+    +'<div class="mseg3">'
+    +['auto','light','dark'].map(k=>'<button data-theme="'+k+'"'+(m===k?' class="on"':'')+'>'+k[0].toUpperCase()+k.slice(1)+'</button>').join("")
+    +'</div><div class="mnote" style="margin-top:6px">Auto follows your device. Severity colours stay the same in every theme.</div>';
+  h+='<div class="sgrp">Home zone</div>'
+    +'<div class="mnote">'+(home?("Home is "+mobEsc(home)+"."):"No home zone set.")
+    +' Favourites: '+pins.length+' of '+MOB_PIN_MAX+'.</div>'
+    +'<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">'
+    +(zid&&zid!==home?'<button class="mbtn" id="mobSetHome">Set '+mobEsc(zid)+' as home</button>':'')
+    +(home?'<button class="mbtn ghost" id="mobGoHome">Go to '+mobEsc(home)+'</button>':'')
+    +(home?'<button class="mbtn ghost" id="mobClrHome">Clear home</button>':'')
+    +'</div>';
+  h+='<div class="sgrp">Data</div>'
+    +'<div class="mnote">Weather '+(age==null?"not loaded":("cached "+age+" min ago"))
+    +'. Refreshes on open when it is stale, on a new model cycle, or on a new day. Fuels lock at '
+    +FEMS_FREEZE_HOUR+':00 local.</div>'
+    +'<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">'
+    +'<button class="mbtn" id="mobForceRefresh">Refresh everything now</button></div>';
+  h+='<div class="sgrp">View</div>'
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap">'
+    +'<button class="mbtn ghost" id="mobGoFull">Open the full dashboard</button></div>'
+    +'<div class="mnote" style="margin-top:6px">The desktop view has calibration, settings and the charts. '
+    +'Mobile mode returns automatically on a phone-sized screen.</div>';
+  h+='<div class="mfoot" style="margin-top:12px">Fire Potential Dashboard v'+mobEsc(APP_VERSION)
+    +' \u00b7 same engine, weights and calibration as the desktop view.</div>';
+  inn.innerHTML=h;sh.classList.add("on");
+  $("mobSheetX").onclick=()=>sh.classList.remove("on");
+  sh.onclick=e=>{if(e.target===sh)sh.classList.remove("on");};
+  inn.querySelectorAll("[data-theme]").forEach(b=>b.onclick=()=>{setTheme(b.dataset.theme);mobMoreOpen();});
+  const sh1=$("mobSetHome");if(sh1)sh1.onclick=()=>{setHomeZone(zid);mobMoreOpen();};
+  const gh=$("mobGoHome");if(gh)gh.onclick=()=>{sh.classList.remove("on");mobZoneGo(home);};
+  const ch=$("mobClrHome");if(ch)ch.onclick=()=>{setHomeZone(null);mobMoreOpen();};
+  const fr=$("mobForceRefresh");if(fr)fr.onclick=async()=>{sh.classList.remove("on");
+    try{await runFetchAll(true,true);}catch(e){}renderMob();};
+  const gf=$("mobGoFull");if(gf)gf.onclick=()=>{sh.classList.remove("on");state.uiMode="desktop";persist();applyMode();};
 }
 function mobLinksOpen(){
   const sh=$("mobSheet"),inn=$("mobSheetIn");if(!sh||!inn)return;
@@ -5455,7 +5622,7 @@ function boot(){
   renderPanels();calcRecalc();renderAll();
   /* v91: mobile mode + toggles + climo auto-normals for the loaded area */
   const mb=$("mobBtn");if(mb)mb.onclick=()=>{state.uiMode="mobile";persist();applyMode();};
-  const tf=$("mobTabFull");if(tf)tf.onclick=()=>{state.uiMode="desktop";persist();applyMode();};
+  const tmo=$("mobTabMore");if(tmo)tmo.onclick=()=>mobMoreOpen();
   const tb=$("mobTabBrief");if(tb)tb.onclick=()=>{MOB_TAB.v="brief";renderMob();};
   const tm=$("mobTabMatrix");if(tm)tm.onclick=()=>{MOB_TAB.v="matrix";renderMob();};
   const tz=$("mobTabZones");if(tz)tz.onclick=()=>{MOB_TAB.v="zones";renderMob();};
