@@ -853,9 +853,15 @@ const IDX_MAX={erc:1,bi:1,ic:1,sc:1,kbdi:1};   /* severity direction: daily/area
    day's value, and until that exists we prefer the forecast row, which is issued once and
    holds still. Ranked: 13:00 observation > forecast > partial-day observation. */
 const FEMS_D0_HOUR=13;              /* NFDRS observation hour, when a feed provides one */
-const FEMS_FREEZE_HOUR=15;          /* local hour after which today's observed value locks */
-const FEMS_SRC_RANK={obsFrozen:4,obs:3,fcst:2};
-function femsSrcLabel(s){return s==="obsFrozen"?"observed (locked)":s==="obs"?"observed":s==="fcst"?"forecast":null;}
+const FEMS_FREEZE_HOUR=15;          /* local hour after which an observed day-0 value locks */
+/* v106: on TODAY the forecast row is what we want — it states the danger for the day ahead
+   of the day, which is the whole point of a morning briefing. Observations are the fallback
+   for stations with no forecast row, and there the v103 freeze still applies so a partial
+   day cannot ratchet the rating upward all afternoon.
+   fcst > obsFrozen > obs: forecast always wins, and once an observed value locks only a
+   forecast may replace it. */
+const FEMS_SRC_RANK={fcst:5,obsFrozen:3,obs:2};
+function femsSrcLabel(s){return s==="fcst"?"forecast":s==="obsFrozen"?"observed (locked)":s==="obs"?"observed":null;}
 /* which NFDRS fuel model an entry belongs to — tagged at parse time, else read off the
    suffixed value keys, so per-model grouping still works on legacy/hand-mapped imports */
 function femsFmOf(e){
@@ -875,7 +881,7 @@ const OM_MODELS_FULL=["gfs_seamless","ecmwf_ifs025","icon_seamless","gem_seamles
 const OM_MODELS_LEAN=["gfs_seamless","ecmwf_ifs025"];
 function omModels(){return state.ensMode==="full"?OM_MODELS_FULL:OM_MODELS_LEAN;}
 function ensembleLab(){return state.ensMode==="full"?((OM_MODELS_FULL.length+1)+" · full ensemble"):((OM_MODELS_LEAN.length+1)+" · lean (GFS+ECMWF+NWS)");}
-const APP_VERSION="105"; /* PWA — bump together with sw.js CACHE on every release */
+const APP_VERSION="106"; /* PWA — bump together with sw.js CACHE on every release */
 const MAX_RAWS=5; /* v84: station cap per area — API discipline; pickers rank active-first, then nearest */
 const PDS_RE=/particularly\s+dangerous\s+situation/i; /* v84: PDS wording inside a Red Flag Warning — display only */
 /* ==================== v86: narrative pools — driven by / held in check ==================== */
@@ -1790,10 +1796,10 @@ function femsStaleReason(p,now){
   /* upgrade a forecast/partial day-0 to the 13:00 observation once it should exist */
   const ranks=Object.keys(src).filter(k=>k!=="__day").map(k=>FEMS_SRC_RANK[src[k]]||0);
   const best=ranks.sort((a,b)=>b-a)[0]||0;
-  if(best>=FEMS_SRC_RANK.obsFrozen)return null;              /* locked for the day */
-  if(best<=FEMS_SRC_RANK.fcst)return "obs-due";              /* still on forecast: look for observed */
-  if(new Date(now).getHours()>=FEMS_FREEZE_HOUR)return "freeze-due"; /* one last pull, then lock */
-  return null;
+  if(best>=FEMS_SRC_RANK.fcst)return null;                   /* forecast in hand: done for today */
+  if(best>=FEMS_SRC_RANK.obsFrozen)return "fcst-due";        /* observed and locked, still no forecast */
+  if(new Date(now).getHours()>=FEMS_FREEZE_HOUR)return "freeze-due"; /* last observed pull, then lock */
+  return "fcst-due";                                         /* observed only: keep watching for the forecast */
 }
 function wxCacheKey(pts){return pts.map(x=>(+x.lat).toFixed(3)+","+(+x.lon).toFixed(3)).join(";");}
 async function fetchOpenMeteoCached(p,force){
@@ -2943,11 +2949,11 @@ function reduceEntriesDaily(entries){
     let g=groups[k].slice();const sid=g[0].sid,day=g[0].day;
     /* v89: FEMS table exports mix observed (O) and forecast (F) rows in one file — when a
        date carries both, the observation wins outright. API pulls are homogeneous per call. */
-    /* v103: observation wins the same date (v89). On TODAY the choice is made per fuel
-       model — the export carries one row per (day, model) and collapsing them would drop
-       every model but one, which is exactly how a zone ended up reading its V-grass number
-       under a Y-timber rating. Observation is preferred; forecast is the fallback when
-       today has no observation rows yet. */
+    /* v103/v106: observation wins on finished dates (v89). On TODAY the choice is made per
+       fuel model — the export carries one row per (day, model) and collapsing them would
+       drop every model but one, which is how a zone ended up reading its V-grass number
+       under a Y-timber rating. For today the FORECAST row is preferred: it describes the
+       day ahead of time. Observations are the fallback when no forecast row exists. */
     const isToday=(day===genDays()[0]);
     let d0src=null;
     if(!isToday){
@@ -2958,8 +2964,9 @@ function reduceEntriesDaily(entries){
       const keep=[];
       for(const m in byFm){
         const set=byFm[m];
+        const fcst=set.filter(e=>e.typ==="F");
         const obs=set.filter(e=>e.typ!=="F");
-        const use=obs.length?obs:set.filter(e=>e.typ==="F");
+        const use=fcst.length?fcst:obs;
         if(!use.length)continue;
         /* if a feed ever does give us hours, take the one nearest 13:00; otherwise the
            single daily row is all there is */
@@ -2968,7 +2975,8 @@ function reduceEntriesDaily(entries){
           hrs.sort((a,b)=>Math.abs(a.hour-FEMS_D0_HOUR)-Math.abs(b.hour-FEMS_D0_HOUR));
           keep.push(hrs[0]);
         }else keep.push(use[0]);
-        if(obs.length)d0src=d0src||"obs";
+        if(fcst.length)d0src="fcst";            /* any forecast row marks the day forecast-led */
+        else if(!d0src)d0src="obs";
       }
       if(keep.length)g=keep;
       if(!d0src)d0src="fcst";
@@ -3018,7 +3026,8 @@ function storeFemsRows(entries){
       /* v103 (D): today's observed value may be revised until the cutoff, then it locks.
          These are date-only daily aggregates that FEMS grows through the day, so without a
          lock the rating climbs all afternoon on bookkeeping rather than on fuels. */
-      if(prevSrc==="obsFrozen"){w[r.sid]=1;continue;}
+      /* v106: a lock stops observations from ratcheting, but the forecast still outranks it */
+      if(prevSrc==="obsFrozen"&&r.src!=="fcst"){w[r.sid]=1;continue;}
       let src=r.src;
       if(src==="obs"&&new Date().getHours()>=FEMS_FREEZE_HOUR)src="obsFrozen";
       if(prevSrc&&(FEMS_SRC_RANK[prevSrc]||0)>(FEMS_SRC_RANK[src]||0)){w[r.sid]=1;continue;}
@@ -4581,7 +4590,8 @@ function mobMoreOpen(){
     +'</div>';
   h+='<div class="sgrp">Data</div>'
     +'<div class="mnote">Weather '+(age==null?"not loaded":("cached "+age+" min ago"))
-    +'. Refreshes on open when it is stale, on a new model cycle, or on a new day. Fuels lock at '
+    +'. Refreshes on open when it is stale, on a new model cycle, or on a new day. '
+    +'Today\u2019s fuels use the FEMS forecast; where a station has none, the observed value locks at '
     +FEMS_FREEZE_HOUR+':00 local.</div>'
     +'<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">'
     +'<button class="mbtn" id="mobForceRefresh">Refresh everything now</button></div>';
