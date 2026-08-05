@@ -282,7 +282,9 @@ body.mobOn.dark{background:#17150f}
   --mmut:#8a7c66;--mlab:#645741;--macc:#c67139;--maccd:#8f4c1d;--msage:#7a8a5e;--msaged:#4f5c3a;
   --m0t:#e2ede4;--m1t:#e2eaf3;--m2t:#f9f3dd;--m3t:#faebde;--m4t:#f6e0df;--m2ink:#5f4a05;--mnt:#fffdf8;
   --mshc:0 2px 10px rgba(90,60,20,.08)}
-#mobScroll{flex:1;overflow:auto;-webkit-overflow-scrolling:touch;padding:14px 14px 108px;display:flex;flex-direction:column;gap:10px}
+#mobScroll{flex:1;overflow:auto;-webkit-overflow-scrolling:touch;
+  padding:calc(14px + env(safe-area-inset-top)) 14px calc(108px + env(safe-area-inset-bottom));
+  display:flex;flex-direction:column;gap:10px}
 /* v97: flex items shrink by default — once the setup panel made the column taller than
    the viewport, the one child with its own overflow (the zone window) collapsed to zero
    height and the FWZ list vanished. Nothing in this column may shrink. */
@@ -311,7 +313,7 @@ body.mobOn.dark{background:#17150f}
 #mobStrip .sadj{font-size:9.5px;font-weight:800}
 #mobStrip .ssc{font:600 9px ui-monospace,Menlo,monospace;opacity:.85}
 /* v97: floating pill bar — lifted off the bottom edge so the tabs are actually thumb-reachable */
-#mobTabs{position:fixed;left:12px;right:12px;bottom:calc(16px + env(safe-area-inset-bottom));display:flex;
+#mobTabs{position:fixed;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));display:flex;
   background:rgba(253,248,238,.92);backdrop-filter:blur(14px);border:1px solid var(--mline2);
   border-radius:18px;box-shadow:0 6px 22px rgba(90,60,20,.16);padding:7px;gap:6px;z-index:60}
 #mobTabs button{flex:1;border:none;border-radius:13px;padding:11px 4px;font:700 12px Figtree,sans-serif;cursor:pointer;background:none;color:var(--mlab);touch-action:manipulation}
@@ -842,6 +844,7 @@ const FM_LAB={Y:"Y — timber",V:"V — grass",W:"W — grass/shrub",X:"X — br
 const FM_VARY={erc:1,bi:1,ic:1,sc:1}; /* the only fields that differ by fuel model */
 const fmBase=f=>f.replace(/_[VWXYZ]$/,""); /* erc_V → erc for direction/threshold lookups */
 const FEMS_KEEP_DAYS=60; /* rolling window for stored FEMS dailies — referenced by pruneFems() during boot migration */
+const MOB_PIN_MAX=10; /* favourite zones cap — referenced by migrate() during boot, so it lives up here */
 const IDX_MAX={erc:1,bi:1,ic:1,sc:1,kbdi:1};   /* severity direction: daily/area max */
 /* v100: NFDRS daily indices are defined at 13:00 LST. For finished days the daily max over
    hourly rows is a fair worst case and it never moves again. For TODAY it ratchets: each
@@ -872,7 +875,7 @@ const OM_MODELS_FULL=["gfs_seamless","ecmwf_ifs025","icon_seamless","gem_seamles
 const OM_MODELS_LEAN=["gfs_seamless","ecmwf_ifs025"];
 function omModels(){return state.ensMode==="full"?OM_MODELS_FULL:OM_MODELS_LEAN;}
 function ensembleLab(){return state.ensMode==="full"?((OM_MODELS_FULL.length+1)+" · full ensemble"):((OM_MODELS_LEAN.length+1)+" · lean (GFS+ECMWF+NWS)");}
-const APP_VERSION="104"; /* PWA — bump together with sw.js CACHE on every release */
+const APP_VERSION="105"; /* PWA — bump together with sw.js CACHE on every release */
 const MAX_RAWS=5; /* v84: station cap per area — API discipline; pickers rank active-first, then nearest */
 const PDS_RE=/particularly\s+dangerous\s+situation/i; /* v84: PDS wording inside a Red Flag Warning — display only */
 /* ==================== v86: narrative pools — driven by / held in check ==================== */
@@ -3803,7 +3806,6 @@ setInterval(renderDataAge,5*60*1000); /* keep the age honest while the tab sits 
 
 /* ===================== v91 MOBILE MODE + FPB CLIMO AUTO-NORMALS ===================== */
 const MOB_BP=700;let MOB_MQ=null,MOB_BUSY=false;const CLIMO_TRIED={};
-const MOB_PIN_MAX=10;   /* favourites cap */
 /* v104: tab icons — lucide-style 24px strokes, drawn to match the alert glyph already used
    on the Brief. Kept inline so the shell stays a single self-contained file. */
 const MOB_SVG=(p)=>'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+p+'</svg>';
@@ -3833,7 +3835,7 @@ function setTheme(m){state.theme=m;persist();applyTheme();renderMob();}
 /* v104: page zoom stays off outside the map. touch-action alone does not stop pinch on iOS
    Safari, so the viewport is locked while mobile mode is on and restored on the way out. */
 const MOB_VP_DEF="width=device-width,initial-scale=1";
-const MOB_VP_LOCK="width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,user-scalable=no,viewport-fit=cover";
+const MOB_VP_LOCK="width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,user-scalable=no";
 function mobViewportLock(on){
   let m=document.querySelector('meta[name="viewport"]');
   if(!m){m=document.createElement("meta");m.name="viewport";document.head.appendChild(m);}
