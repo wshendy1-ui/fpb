@@ -815,11 +815,11 @@ function ercBand(v,bp){if(v==null||isNaN(v))return "";if(!bp)bp=DEF_BREAKS; /* v
 
 /* ==================== CONFIG ==================== */
 const FEMS_URL_DEF="https://fems.fs2c.usda.gov/api/climatology/download-nfdr?stationIds={ids}&startDate={d0}T00:00:00&endDate={d6}T23:59:59&dataFormat=csv&dataset={ds}&fuelModels={fm}";
-/* v107: the plain download-nfdr response is the DAILY AVERAGE (AvgERC, AvgBI...). Fire
-   danger ratings key off the daily peak, which the NfdrsDailySummary export carries along
-   with the hour it occurred (MaxERCTime, MaxBITime). These are the query variants to try,
-   in order; the winner is detected from the returned header line and remembered. */
-const FEMS_SUMMARY_PARAMS=["&dataType=NfdrsDailySummary","&datasetType=daily-summary","&aggregation=daily-summary","&summaryType=daily"];
+/* v108: download-nfdr returns DAILY AVERAGES (AvgERC, AvgBI...), which read well below the
+   peak a fire danger rating is based on. The daily summary is a different endpoint, and
+   dataset=all returns observed and forecast rows in one response, each tagged with its own
+   NFDRType — so a single request covers the window and the O/F split comes from the data. */
+const FEMS_SUM_URL_DEF="https://fems.fs2c.usda.gov/api/ext-climatology/download-nfdr-daily-summary/?dataset=all&startDate={d0}&endDate={d6}&dataFormat=csv&stationIds={ids}&fuelModels={fm}";
 /* which flavour of feed a CSV is, read off its headers */
 function femsNoteKind(k){
   const p=area();if(!p||!k)return;
@@ -907,7 +907,7 @@ const OM_MODELS_FULL=["gfs_seamless","ecmwf_ifs025","icon_seamless","gem_seamles
 const OM_MODELS_LEAN=["gfs_seamless","ecmwf_ifs025"];
 function omModels(){return state.ensMode==="full"?OM_MODELS_FULL:OM_MODELS_LEAN;}
 function ensembleLab(){return state.ensMode==="full"?((OM_MODELS_FULL.length+1)+" · full ensemble"):((OM_MODELS_LEAN.length+1)+" · lean (GFS+ECMWF+NWS)");}
-const APP_VERSION="107"; /* PWA — bump together with sw.js CACHE on every release */
+const APP_VERSION="108"; /* PWA — bump together with sw.js CACHE on every release */
 const MAX_RAWS=5; /* v84: station cap per area — API discipline; pickers rank active-first, then nearest */
 const PDS_RE=/particularly\s+dangerous\s+situation/i; /* v84: PDS wording inside a Red Flag Warning — display only */
 /* ==================== v86: narrative pools — driven by / held in check ==================== */
@@ -2159,28 +2159,31 @@ function femsUrlFor(ds,oneId,extra){
   const suffix=(extra!==undefined)?extra:(state.femsSummaryParam||"");
   return base+(suffix||"");
 }
+/* v108: the summary window spans the observed tail and the forecast days in one call */
+function femsSumUrlFor(oneId){
+  const p=area();
+  const ids=oneId!=null?String(oneId):(p.stations||[]).filter(s=>s.sel).map(s=>s.id).join(",");
+  return (state.femsSumUrl||FEMS_SUM_URL_DEF)
+    .replace("{ids}",ids).replace("{d0}",dayOff(-2)).replace("{d6}",fx.days[6]||dayOff(6))
+    .replace("{fm}",encodeURIComponent(state.femsMultiFm===false?(p.fuelModel||"Y"):FM_SET.join(",")));
+}
+/* one request, both row types; returns how many rows landed (0 means try the old endpoint) */
+async function fetchFemsSummary(oneId){
+  const r=await jget(femsSumUrlFor(oneId));
+  const txt=await r.text();
+  const kind=femsKindOf(String(txt).split(/\r?\n/).slice(0,3).join(",").split(","));
+  if(kind!=="summary")throw new Error("not a daily summary response");
+  /* typ comes from each row's NFDRType column, so no dataset tag is forced here */
+  let k=0;
+  try{k=importFemsJson(JSON.parse(txt),{});}
+  catch(e){k=Math.max(0,importFemsCsv(txt,"API",oneId!=null?{silent:true,forceSid:oneId}:{silent:true}));}
+  return k;
+}
 /* v107: probe for a daily-summary response once, then stick with whatever worked. Returns
    the CSV text and records the winning parameter; falls back to the average endpoint. */
 async function femsFetchBest(ds,oneId){
-  const tried=[];
-  const first=(state.femsSummaryParam!=null)?[state.femsSummaryParam]:FEMS_SUMMARY_PARAMS.concat([""]);
-  for(const sfx of first){
-    try{
-      const r=await jget(femsUrlFor(ds,oneId,sfx));
-      const txt=await r.text();
-      const head=String(txt).split(/\r?\n/).slice(0,3).join(",");
-      const kind=femsKindOf(head.split(","));
-      if(kind==="summary"){
-        if(state.femsSummaryParam!==sfx){state.femsSummaryParam=sfx;persist();
-          console.info("FEMS daily-summary parameter:",sfx||"(none needed)");}
-        return {txt:txt,kind:kind};
-      }
-      tried.push({sfx:sfx,kind:kind});
-      if(state.femsSummaryParam!=null)return {txt:txt,kind:kind};   /* pinned: take what we get */
-    }catch(e){tried.push({sfx:sfx,err:String(e&&e.message||e)});}
-  }
-  /* nothing returned a summary: settle on the plain endpoint and be explicit about it */
-  if(state.femsSummaryParam==null){state.femsSummaryParam="";persist();}
+  /* v108: fallback path only — the summary endpoint is tried first in fetchFems. This is
+     the original average feed, kept so the tool still works if that path is unavailable. */
   const r=await jget(femsUrlFor(ds,oneId,""));
   const txt=await r.text();
   return {txt:txt,kind:femsKindOf(String(txt).split(/\r?\n/).slice(0,3).join(",").split(","))};
@@ -2191,6 +2194,25 @@ async function fetchFems(p,prog){
   const ids=(p.stations||[]).filter(s=>s.sel).map(s=>String(s.id));
   if(!ids.length)throw new Error("no stations selected");
   let n=0;const errs=[];const retry=[];
+  /* v108: daily summary first — one call, peak values, both row types */
+  try{
+    prog("NFDRS daily summary\u2026");
+    const kS=await fetchFemsSummary();
+    if(kS>0){
+      if(ids.length>1){
+        const got=LAST_IMPORT.sids.filter(s=>ids.indexOf(s)>=0).length;
+        if(got<2){
+          /* response could not be split by station: pull them one at a time */
+          let kk=kS;
+          for(const id of ids.slice(1)){
+            try{await sleep(400);kk+=await fetchFemsSummary(id);}catch(e2){errs.push("summary "+id+": "+e2.message);}
+          }
+          return kk;
+        }
+      }
+      return kS;
+    }
+  }catch(e){errs.push("daily-summary: "+e.message);}
   for(const ds of ["observation","forecast"]){
     try{
       prog(ds==="observation"?"observed NFDRS…":"forecast NFDRS…");
@@ -4599,8 +4621,9 @@ function mobLinkSet(){
   /* --- fuels --- */
   const fuels=[];
   if(stns.length){
-    fuels.push({t:"FEMS observed CSV",d:stns.length+" station"+(stns.length===1?"":"s")+" \u00b7 last 3 days",u:femsUrlFor("observation")});
-    fuels.push({t:"FEMS forecast CSV",d:stns.length+" station"+(stns.length===1?"":"s")+" \u00b7 7 days",u:femsUrlFor("forecast")});
+    fuels.push({t:"FEMS daily summary CSV",d:stns.length+" station"+(stns.length===1?"":"s")+" \u00b7 peaks, observed + forecast",u:femsSumUrlFor()});
+    fuels.push({t:"FEMS observed CSV",d:"daily averages \u00b7 last 3 days",u:femsUrlFor("observation")});
+    fuels.push({t:"FEMS forecast CSV",d:"daily averages \u00b7 7 days",u:femsUrlFor("forecast")});
   }else{
     fuels.push({t:"FEMS observed CSV",d:"select stations first",u:null});
     fuels.push({t:"FEMS forecast CSV",d:"select stations first",u:null});
