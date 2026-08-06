@@ -815,6 +815,32 @@ function ercBand(v,bp){if(v==null||isNaN(v))return "";if(!bp)bp=DEF_BREAKS; /* v
 
 /* ==================== CONFIG ==================== */
 const FEMS_URL_DEF="https://fems.fs2c.usda.gov/api/climatology/download-nfdr?stationIds={ids}&startDate={d0}T00:00:00&endDate={d6}T23:59:59&dataFormat=csv&dataset={ds}&fuelModels={fm}";
+/* v107: the plain download-nfdr response is the DAILY AVERAGE (AvgERC, AvgBI...). Fire
+   danger ratings key off the daily peak, which the NfdrsDailySummary export carries along
+   with the hour it occurred (MaxERCTime, MaxBITime). These are the query variants to try,
+   in order; the winner is detected from the returned header line and remembered. */
+const FEMS_SUMMARY_PARAMS=["&dataType=NfdrsDailySummary","&datasetType=daily-summary","&aggregation=daily-summary","&summaryType=daily"];
+/* which flavour of feed a CSV is, read off its headers */
+function femsNoteKind(k){
+  const p=area();if(!p||!k)return;
+  const prev=p.femsKind;
+  p.femsKind=k;
+  if(prev&&prev!==k&&(prev==="avg"||k==="avg")){
+    /* peaks run materially above means for ERC and BI, so ladders tuned on one source read
+       wrong on the other. Say so instead of letting the ratings drift silently. */
+    toast("FEMS source changed: "+(FEMS_KIND_LAB[prev]||prev)+" \u2192 "+(FEMS_KIND_LAB[k]||k)
+      +". ERC breakpoints and the BI ladder were calibrated on the old source \u2014 recalibrate before trusting the tiers.");
+  }
+  persist();
+}
+function femsKindOf(headers){
+  const h=(headers||[]).map(x=>String(x).toLowerCase().replace(/[^a-z0-9]/g,""));
+  if(h.some(x=>/^max(erc|bi|ic|sc)time$/.test(x)||/^min\d+hrfmtime$/.test(x)))return "summary";
+  if(h.some(x=>/^avg(erc|bi|ic|sc)$/.test(x)))return "avg";
+  if(h.some(x=>/^(energyreleasecomponent|burningindex)$/.test(x)))return "hourly";
+  return null;
+}
+const FEMS_KIND_LAB={summary:"daily summary (peak)",avg:"daily average",hourly:"hourly"};
 const PSA_SVC_DEF="https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/National_PSA_Current/FeatureServer/0";
 const RAWS_SVC_DEF="https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/PublicView_RAWS/FeatureServer/0";
 const HDW_SITE_DEF="https://hdwindex.fs2c.usda.gov/";
@@ -881,7 +907,7 @@ const OM_MODELS_FULL=["gfs_seamless","ecmwf_ifs025","icon_seamless","gem_seamles
 const OM_MODELS_LEAN=["gfs_seamless","ecmwf_ifs025"];
 function omModels(){return state.ensMode==="full"?OM_MODELS_FULL:OM_MODELS_LEAN;}
 function ensembleLab(){return state.ensMode==="full"?((OM_MODELS_FULL.length+1)+" · full ensemble"):((OM_MODELS_LEAN.length+1)+" · lean (GFS+ECMWF+NWS)");}
-const APP_VERSION="106"; /* PWA — bump together with sw.js CACHE on every release */
+const APP_VERSION="107"; /* PWA — bump together with sw.js CACHE on every release */
 const MAX_RAWS=5; /* v84: station cap per area — API discipline; pickers rank active-first, then nearest */
 const PDS_RE=/particularly\s+dangerous\s+situation/i; /* v84: PDS wording inside a Red Flag Warning — display only */
 /* ==================== v86: narrative pools — driven by / held in check ==================== */
@@ -2124,12 +2150,40 @@ async function fetchAlerts(p){
   return (a.features||[]).map(f=>f.properties||{});
 }
 function dayOff(off){const t=new Date(Date.parse(fx.days[0]+"T12:00:00")+off*864e5);return t.toISOString().slice(0,10);}
-function femsUrlFor(ds,oneId){
+function femsUrlFor(ds,oneId,extra){
   const p=area();const ids=oneId!=null?String(oneId):(p.stations||[]).filter(s=>s.sel).map(s=>s.id).join(",");
   const d0=ds==="observation"?dayOff(-2):fx.days[0];
   const d6=ds==="observation"?fx.days[0]:fx.days[6];
-  return (state.femsUrl||FEMS_URL_DEF).replace("{ids}",ids).replace("{d0}",d0).replace("{d6}",d6)
+  const base=(state.femsUrl||FEMS_URL_DEF).replace("{ids}",ids).replace("{d0}",d0).replace("{d6}",d6)
     .replace("{fm}",encodeURIComponent(state.femsMultiFm===false?(p.fuelModel||"Y"):FM_SET.join(","))).replace("{ds}",ds);
+  const suffix=(extra!==undefined)?extra:(state.femsSummaryParam||"");
+  return base+(suffix||"");
+}
+/* v107: probe for a daily-summary response once, then stick with whatever worked. Returns
+   the CSV text and records the winning parameter; falls back to the average endpoint. */
+async function femsFetchBest(ds,oneId){
+  const tried=[];
+  const first=(state.femsSummaryParam!=null)?[state.femsSummaryParam]:FEMS_SUMMARY_PARAMS.concat([""]);
+  for(const sfx of first){
+    try{
+      const r=await jget(femsUrlFor(ds,oneId,sfx));
+      const txt=await r.text();
+      const head=String(txt).split(/\r?\n/).slice(0,3).join(",");
+      const kind=femsKindOf(head.split(","));
+      if(kind==="summary"){
+        if(state.femsSummaryParam!==sfx){state.femsSummaryParam=sfx;persist();
+          console.info("FEMS daily-summary parameter:",sfx||"(none needed)");}
+        return {txt:txt,kind:kind};
+      }
+      tried.push({sfx:sfx,kind:kind});
+      if(state.femsSummaryParam!=null)return {txt:txt,kind:kind};   /* pinned: take what we get */
+    }catch(e){tried.push({sfx:sfx,err:String(e&&e.message||e)});}
+  }
+  /* nothing returned a summary: settle on the plain endpoint and be explicit about it */
+  if(state.femsSummaryParam==null){state.femsSummaryParam="";persist();}
+  const r=await jget(femsUrlFor(ds,oneId,""));
+  const txt=await r.text();
+  return {txt:txt,kind:femsKindOf(String(txt).split(/\r?\n/).slice(0,3).join(",").split(","))};
 }
 function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
 async function fetchFems(p,prog){
@@ -2140,8 +2194,7 @@ async function fetchFems(p,prog){
   for(const ds of ["observation","forecast"]){
     try{
       prog(ds==="observation"?"observed NFDRS…":"forecast NFDRS…");
-      const r=await jget(femsUrlFor(ds));
-      const txt=await r.text();
+      const got=await femsFetchBest(ds);const txt=got.txt;
       const dsTyp=(ds==="observation")?"O":"F";
         let k=0;try{k=importFemsJson(JSON.parse(txt),{typ:dsTyp});}catch(e){k=Math.max(0,importFemsCsv(txt,"API",{silent:true,typ:dsTyp}));}
       n+=k;
@@ -2157,7 +2210,7 @@ async function fetchFems(p,prog){
     let n2=0;
     for(const ds of ["observation","forecast"]){
       try{prog("retry ("+(p.fuelModel||"Y")+" only)…");
-        const r=await jget(femsUrlFor(ds));const txt=await r.text();
+        const got=await femsFetchBest(ds);const txt=got.txt;
         const dsTyp=(ds==="observation")?"O":"F";
         let k=0;try{k=importFemsJson(JSON.parse(txt),{typ:dsTyp});}catch(e){k=Math.max(0,importFemsCsv(txt,"API",{silent:true,typ:dsTyp}));}
         n2+=k;}catch(e){errs.push("retry "+ds+": "+e.message);}
@@ -2183,8 +2236,7 @@ async function fetchFems(p,prog){
         try{
           prog("station "+id+" ("+ii+"/"+ids.length+", "+(ds==="observation"?"obs":"fcst")+")…");
           await sleep(600);
-          const r=await jget(femsUrlFor(ds,id));
-          const txt=await r.text();
+          const got=await femsFetchBest(ds,id);const txt=got.txt;
           const dsTyp=(ds==="observation")?"O":"F";
           let k=0;try{k=importFemsJson(JSON.parse(txt),{forceSid:id,typ:dsTyp});}catch(e){k=Math.max(0,importFemsCsv(txt,"API",{silent:true,forceSid:id,typ:dsTyp}));}
           n+=k;
@@ -3053,6 +3105,13 @@ function storeFemsRows(entries){
 /* returns: n>0 imported · 0 failed (toasted) · -1 mapping dialog opened */
 function importFemsCsv(text,srcId,opts){
   opts=opts||{};
+  /* v107: note which flavour of NFDRS data this was, so the UI can say so and a switch of
+     source can prompt a recalibration rather than quietly moving every rating. */
+  try{
+    const head=String(text).split(/\r?\n/).slice(0,3).join(",");
+    const k=femsKindOf(head.split(","));
+    if(k)femsNoteKind(k);
+  }catch(e){}
   let parsed;
   try{parsed=parseFemsCsv(text);}
   catch(e){
@@ -4103,7 +4162,8 @@ function renderMob(){
       const cell=mobCellHtml(r,si,"inline");fu.push(cell||mobCellRaw(mobName(r),null,mobUn(r),null,null));}
     h+='<div class="mcard"><div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:9px">'
       +'<div class="mkick">Fuels &amp; NFDRS — FM '+mobEsc((p&&p.fuelModel)||"Y")+'</div>'
-      +'<span style="font:600 9px Figtree,sans-serif;letter-spacing:.05em;color:var(--mmut)">RAWS · FEMS</span></div>'
+      +'<span style="font:600 9px Figtree,sans-serif;letter-spacing:.05em;color:'+((p&&p.femsKind==="avg")?"#a13c1c":"var(--mmut)")+'">'
+      +mobEsc(p&&p.femsKind?("FEMS · "+(FEMS_KIND_LAB[p.femsKind]||p.femsKind)):"RAWS · FEMS")+'</span></div>'
       +'<div class="mgrid" id="mobFuGrid">'+fu.join("")+'</div></div>';}
   /* footer: provenance + disclaimer */
   const stnN=((p&&p.stations)||[]).filter(s=>s.sel).length;
@@ -4592,7 +4652,8 @@ function mobMoreOpen(){
     +'<div class="mnote">Weather '+(age==null?"not loaded":("cached "+age+" min ago"))
     +'. Refreshes on open when it is stale, on a new model cycle, or on a new day. '
     +'Today\u2019s fuels use the FEMS forecast; where a station has none, the observed value locks at '
-    +FEMS_FREEZE_HOUR+':00 local.</div>'
+    +FEMS_FREEZE_HOUR+':00 local. Source: '+mobEsc(p&&p.femsKind?(FEMS_KIND_LAB[p.femsKind]||p.femsKind):"not imported yet")
+    +((p&&p.femsKind==="avg")?' \u2014 daily averages read below the peak the danger rating uses.':'')+'</div>'
     +'<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">'
     +'<button class="mbtn" id="mobForceRefresh">Refresh everything now</button></div>';
   h+='<div class="sgrp">View</div>'
