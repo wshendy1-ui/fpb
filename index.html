@@ -232,7 +232,7 @@ select,.btn{background:var(--panel2); color:var(--text); border:1px solid var(--
 <div id="app">
 
   <header>
-    <div class="brand"><h1>Fire potential briefing</h1><span class="sub">v2.4.1</span></div>
+    <div class="brand"><h1>Fire potential briefing</h1><span class="sub">v2.5 · W1</span></div>
     <div id="hdrZone">loading…</div>
     <div class="pills">
       <div id="outlooksWrap">
@@ -637,9 +637,11 @@ function normalSeries(normals, key, days){
 }
 /* full refined assembly from per-model parsed samples — the DP-1 core.
    samples=[{who, d:parseOmOne-output}], normals may be null (abs fallback). */
-function refinedFromSamples(samples, normals, elevM, mode, hdwT){
+function refinedFromSamples(samples, climo, elevM, mode, hdwT){
   const C = (typeof FPBCore !== "undefined") ? FPBCore : null;
   if (!C || !samples || !samples.length) return null;
+  const normals = climo ? climo.n : null;
+  const bands   = climo ? climo.b : null;
   const days = samples[0].d.days.slice(0, 7);
   const wxAgg = C.aggregateWx(samples, days, mode === "high" ? "high" : "mean");
   const conf = C.modelSpread(samples, days);
@@ -653,9 +655,9 @@ function refinedFromSamples(samples, normals, elevM, mode, hdwT){
       { id:"tmax",  s:C.devSev("tmax",  d.tmax,  k, normals), w:C.THR_DEF.tmax.w },
       { id:"rhmin", s:C.devSev("rhmin", d.rhmin, k, normals), w:C.THR_DEF.rhmin.w },
       { id:"rhrec", s:C.devSev("rhrec", d.rhrec, k, normals), w:C.THR_DEF.rhrec.w },
-      { id:"wind",  s:C.sevFromThr(d.wind, C.THR_DEF.wind.t, 1), w:C.THR_DEF.wind.w },
-      { id:"gust",  s:C.sevFromThr(d.gust, C.THR_DEF.gust.t, 1), w:C.THR_DEF.gust.w },
-      { id:"pop",   s:C.sevFromThr(d.pop,  C.THR_DEF.pop.t,  0), w:C.THR_DEF.pop.w },
+      { id:"wind",  s:C.windSev(bands, "wind", k, d.wind, C.THR_DEF.wind.t).s, w:C.THR_DEF.wind.w },
+      { id:"gust",  s:C.windSev(bands, "gust", k, d.gust, C.THR_DEF.gust.t).s, w:C.THR_DEF.gust.w },
+      { id:"pop",   s:C.popSevRel(d.pop, C.wetFreqAt(bands, k), C.THR_DEF.pop.t), w:C.THR_DEF.pop.w },
       { id:"hdw",   s:C.sevFromThr(d.hdw,  hdwT || C.THR_DEF.hdw.t,  1), w:C.THR_DEF.hdw.w },
       { id:"ffwi",  s:C.sevFromThr(d.ffwi, C.THR_DEF.ffwi.t, 1), w:C.THR_DEF.ffwi.w },
       { id:"vpd",   s:C.sevFromThr(d.vpdmax, C.THR_DEF.vpd.t, 1), w:C.THR_DEF.vpd.w },
@@ -673,7 +675,10 @@ function refinedFromSamples(samples, normals, elevM, mode, hdwT){
     push("gust",d.gust);push("pop",d.pop);push("cape",d.cape);push("precip",d.precip,100);
     push("hdw",d.hdw);push("ffwi",d.ffwi);push("vpd",d.vpdmax,10);push("hainesH",d.hainesH,10);push("hainesM",d.hainesM,10);
   }
-  return { days, rec:{ t, s, dl, rows, wx }, conf, hVariant:hApp.v, basis: normals ? "sigma" : "abs" };
+  const windBasis = (bands && C.bandLadder(bands, "wind", days[0])) ? "pctl" : "abs";
+  const wf0 = bands ? C.wetFreqAt(bands, days[0]) : null;
+  return { days, rec:{ t, s, dl, rows, wx }, conf, hVariant:hApp.v,
+    basis: normals ? "sigma" : "abs", windBasis, popBasis: (wf0 != null && wf0 >= 2) ? "rel" : "abs", wf0 };
 }
 function refineWeights(){
   const C = (typeof FPBCore !== "undefined") ? FPBCore : null; if (!C) return null;
@@ -959,7 +964,8 @@ async function runRefine(){
     /* climatology (same origin, cached) */
     if (!(id in S.climo)){
       try { const r = await fetch("climo/" + id + ".json");
-        S.climo[id] = r.ok ? ((await r.json()).wxNormals || null) : null;
+        const cj = r.ok ? await r.json() : null;
+        S.climo[id] = cj && cj.wxNormals ? { n: cj.wxNormals, b: cj.bands || null } : null;
       } catch(e){ S.climo[id] = null; }
     }
     /* frozen zone point: centroid of the boundary (poi differences are sub-grid) */
@@ -1030,7 +1036,9 @@ function renderBriefing(){
   const rec = ref ? ref.rec : S.doc.zones[S.sel];
   const days = ref ? ref.days : S.doc.days;
   const weights = ref ? refineWeights() : S.doc.weights;
-  const climo = S.climo[S.sel] || null;
+  const climoObj = S.climo[S.sel] || null;
+  const climo = climoObj ? climoObj.n : null;
+  const zBands = climoObj ? climoObj.b : null;
   const C = (typeof FPBCore !== "undefined") ? FPBCore : null;
   $("bTitle").textContent = S.sel + " — " + (S.names[S.sel] || "");
   $("bBadges").innerHTML = ref ? "<span class='badgeRef'>REFINED</span>" :
@@ -1071,6 +1079,10 @@ function renderBriefing(){
             " mb data from models (" + (ref.diag.avail[id] || 0) + "/" + ref.nModels + ")";
         }
         if (id === "hdw" && v == null && ref && ref.diag) sub = "no pressure-level data (" + (ref.diag.avail.hdw || 0) + "/" + ref.nModels + ")";
+        if (ref && (id === "wind" || id === "gust"))
+          sub = ref.windBasis === "pctl" ? "vs local " + (id === "wind" ? "gfs-hf" : "era5") + " percentiles" : "absolute ladder (no bands)";
+        if (ref && id === "pop")
+          sub = ref.popBasis === "rel" ? "vs wet-day freq " + ref.wf0 + "%" : "absolute ladder";
         if (C && climo && (id === "tmax" || id === "rhmin" || id === "rhrec") && v != null){
           const z = C.wxSigma(climo, id, k, v);
           if (z != null) sub = (z >= 0 ? "+" : "") + (Math.round(z * 10) / 10) + "σ vs normal";
@@ -1202,7 +1214,7 @@ function chartDataFor(def){
   if (!rec.wx || !rec.wx[def.id]) return null;
   const series=[{ vals:rec.wx[def.id], color:"#e8e4da", label:def.extra?"sust":null }];
   if (def.extra && rec.wx[def.extra]) series.push({ vals:rec.wx[def.extra], color:"#e8842a", label:"gust" });
-  const norm = def.norm ? normalSeries(S.climo[S.sel], def.norm, days) : null;
+  const norm = def.norm ? normalSeries((S.climo[S.sel] || {}).n, def.norm, days) : null;
   let plines = null;
   if (def.id === "hdw"){
     const fit = loadHdwFit(S.sel);

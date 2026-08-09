@@ -102,6 +102,9 @@ const eq = (n, a, b) => { ck(n, JSON.stringify(a) === JSON.stringify(b));
   const ring = v => { const o = {}; for (let m = 1; m <= 12; m++) for (let d = 1; d <= 31; d++)
     o[String(m).padStart(2,"0")+"-"+String(d).padStart(2,"0")] = v; return o; };
   const N = { tmax:ring(90), tmaxSd:ring(5), rhmin:ring(20), rhminSd:ring(5), rhmax:ring(60), rhmaxSd:ring(5) };
+  const BANDS = { window:14, windWindow:21, windBasis:"gfs-hf", qkeys:[15,30,50,75,95],
+    windQ:ring([6,8,10,14,20]), gustQ:ring([12,16,20,26,34]), wetFreq:ring(8) };
+  const CL = { n:N, b:BANDS };
   const days7 = ["2026-07-20","2026-07-21","2026-07-22","2026-07-23","2026-07-24","2026-07-25","2026-07-26"];
   const mk = (tmax) => { const d = {}; for (const k of days7)
     d[k] = { tmax, rhmin:20, rhrec:60, wind:10, gust:20, pop:5, cape:600, precip:0,
@@ -109,24 +112,28 @@ const eq = (n, a, b) => { ck(n, JSON.stringify(a) === JSON.stringify(b));
     return { days:days7, d, tzOff:-25200 }; };
   const samples = [ { who:"Z \u00b7 gfs", d:mk(90) }, { who:"Z \u00b7 ecmwf", d:mk(94) } ];
 
-  const mean = c3.refinedFromSamples(samples, N, 1200, "mean");
+  const mean = c3.refinedFromSamples(samples, CL, 1200, "mean");
   ck("ref-days", mean.days.length === 7 && mean.basis === "sigma");
   eq("ref-wx-mean-tmax", mean.rec.wx.tmax[0], 92);
-  const high = c3.refinedFromSamples(samples, N, 1200, "high");
+  const high = c3.refinedFromSamples(samples, CL, 1200, "high");
   eq("ref-wx-high-tmax", high.rec.wx.tmax[0], 94);
   eq("ref-haines-gate", [mean.hVariant, mean.rec.rows.hainesM[0], mean.rec.rows.hainesH[0]], ["H", null, 4]);
   eq("ref-haines-value-surfaced", [mean.rec.wx.hainesH[0], mean.rec.wx.hainesM[0]], [6, 5]);
   eq("ref-hdw-sev", mean.rec.rows.hdw[0], 2);                    /* 160 in [150,250) band */
-  eq("ref-wind-E1", [mean.rec.rows.wind[0], mean.rec.rows.gust[0]], [1, 1]);  /* 10 mph, 20 mph under E1 */
+  eq("ref-wind-pctl", [mean.rec.rows.wind[0], mean.rec.rows.gust[0]], [2, 2]);  /* 10 vs [6,8,14,20]; 20 vs [12,16,26,34] */
+  eq("ref-pop-rel", mean.rec.rows.pop[0], 2);                                   /* pop 5 / wf 8 = 0.625 */
+  eq("ref-basis-flags", [mean.windBasis, mean.popBasis, mean.wf0], ["pctl","rel",8]);
+  { const noB = c3.refinedFromSamples(samples, { n:N, b:null }, 1200, "mean");
+    eq("ref-wind-abs-fallback", [noB.rec.rows.wind[0], noB.windBasis, noB.popBasis], [1, "abs", "abs"]); }
   ck("ref-dl-cape-R1b", mean.rec.dl[0] === 0);                    /* cape 600 < watch floor */
   { const sW = JSON.parse(JSON.stringify(samples));
     for (const smp of sW) for (const k of days7){ smp.d.d[k].cape = 1500; }
-    ck("ref-dl-watch", c3.refinedFromSamples(sW, N, 1200, "mean").rec.dl[0] === 2);
+    ck("ref-dl-watch", c3.refinedFromSamples(sW, CL, 1200, "mean").rec.dl[0] === 2);
     for (const smp of sW) for (const k of days7){ smp.d.d[k].cape = 2600; }
-    ck("ref-dl-bolt", c3.refinedFromSamples(sW, N, 1200, "mean").rec.dl[0] === 3); }
+    ck("ref-dl-bolt", c3.refinedFromSamples(sW, CL, 1200, "mean").rec.dl[0] === 3); }
   ck("ref-score-sane", mean.rec.s[0] > 1.5 && mean.rec.s[0] < 3.5 && mean.rec.t[0] != null);
   const noN = c3.refinedFromSamples(samples, null, 1200, "mean");
-  eq("ref-abs-basis", noN.basis, "abs");
+  eq("ref-abs-basis", [noN.basis, noN.windBasis], ["abs","abs"]);
   eq("normalSeries", c3.normalSeries(N, "tmax", days7.slice(0,2)), [90,90]);
   eq("deltaTxt", [c3.deltaTxt(2,2), c3.deltaTxt(1,3)], ["matches national", "national MOD → refined V HIGH"]);
   ck("refineWeights", c3.refineWeights().hdw === 1.3 && c3.refineWeights().dryltg === 1.1);
@@ -149,8 +156,8 @@ const eq = (n, a, b) => { ck(n, JSON.stringify(a) === JSON.stringify(b));
      hdw 240 -> sev 2 vs THR [75,150,250,350], sev 3 vs anchors (q90≈231) */
   const s240 = JSON.parse(JSON.stringify(samples));
   for (const smp of s240) for (const k of days7) smp.d.d[k].hdw = 240;
-  ck("hdw-default-240", c3.refinedFromSamples(s240, N, 1200, "mean").rec.rows.hdw[0] === 2);
-  ck("hdw-anchored-240", c3.refinedFromSamples(s240, N, 1200, "mean", c3.hdwThrFromFit(fit)).rec.rows.hdw[0] === 3);
+  ck("hdw-default-240", c3.refinedFromSamples(s240, CL, 1200, "mean").rec.rows.hdw[0] === 2);
+  ck("hdw-anchored-240", c3.refinedFromSamples(s240, CL, 1200, "mean", c3.hdwThrFromFit(fit)).rec.rows.hdw[0] === 3);
 }
 
 /* ================= Layer 2 — jsdom boot smoke ================= */
@@ -242,9 +249,12 @@ function omModelFixture(url){
 }
 function climoRing(v){ const o = {}; for (let m = 1; m <= 12; m++) for (let d = 1; d <= 31; d++)
   o[String(m).padStart(2,"0")+"-"+String(d).padStart(2,"0")] = v; return o; }
-const CLIMO_RING = { schema:"fpb-climo-1", pointset_version:"poi-v1", zone:{ id:"ORZ693" },
+const CLIMO_RING = { schema:"fpb-climo-2", pointset_version:"poi-v1", zone:{ id:"ORZ693" },
   wxNormals: { tmax:climoRing(92), tmaxSd:climoRing(6), rhmin:climoRing(18), rhminSd:climoRing(5),
-               rhmax:climoRing(62), rhmaxSd:climoRing(6) } };
+               rhmax:climoRing(62), rhmaxSd:climoRing(6) },
+  bands: { window:14, windWindow:21, windBasis:"gfs-hf", qkeys:[15,30,50,75,95],
+    windQ:climoRing([6.7,7.8,8.9,10.3,14.4]), gustQ:climoRing([14.1,16.1,19.2,23.5,30]),
+    wetFreq:climoRing(9.1) } };
 w.fetch = (url) => Promise.resolve({
   ok: true, status: 200,
   json: async () => {
@@ -402,6 +412,8 @@ setTimeout(() => {
     ck("brief-hdw-pctl", $("bRows").textContent.indexOf("(USFS anchors)") >= 0);
     ck("brief-haines-na", $("bRows").textContent.indexOf("elevation variant") >= 0);
     ck("brief-rhrec-clarifier", $("bRows").textContent.indexOf("prev-day 20:00→08:00") >= 0);
+    ck("brief-wind-basis", $("bRows").textContent.indexOf("vs local gfs-hf percentiles") >= 0);
+    ck("brief-pop-basis", $("bRows").textContent.indexOf("vs wet-day freq 9.1%") >= 0);
     ck("brief-diag-section", $("bRows").textContent.indexOf("Deep-pull diagnostics") >= 0);
     ck("brief-diag-models", $("bRows").textContent.indexOf("gfs ✓") >= 0 && $("bRows").textContent.indexOf("ecmwf ✓") >= 0);
     ck("brief-diag-avail", $("bRows").textContent.indexOf("700/500mb 1/7") >= 0 &&

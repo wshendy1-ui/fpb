@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /* =========================================================================
-   FPB — rate_national.js (v1.4)
+   FPB — rate_national.js (v1.5)
    Daily national zone ratings: forecast (Open-Meteo, single model, batched
    multi-point) × precomputed climatology (climo-fetcher output) → per-zone
    per-day composite tier via the extracted v83 engine.
@@ -34,6 +34,11 @@
    the engine constant flows through automatically.
    v1.4: ladder tag + dlR1b — dry-lightning CAPE fallback recalibrated in
    engine v1.4 (pop<30 gate; 1000 -> watch sev2; 2000 -> bolt sev3).
+   v1.5: THE W1 FLIP (memo #2b green). Wind/gust score against per-zone
+   day-of-year percentile ladders from climo-2 bands (wind: gfs-hf basis,
+   gust: era5), PoP against the zone's wet-day frequency (ratio ladder).
+   Zones without bands fall back to absolute E1 / absolute PoP — chain
+   unchanged. Doc gains `basis` counts; ladder tag -> v83nT2-W1-dlR1b.
    ========================================================================= */
 "use strict";
 const fs = require("fs");
@@ -105,7 +110,8 @@ function readZones(){
 function loadClimo(id){
   const p = path.join(CLIMO_DIR, id + ".json");
   if (!fs.existsSync(p)) return null;
-  try { const j = JSON.parse(fs.readFileSync(p, "utf8")); return j.wxNormals || null; }
+  try { const j = JSON.parse(fs.readFileSync(p, "utf8"));
+    return j.wxNormals ? { normals: j.wxNormals, bands: j.bands || null } : null; }
   catch (e) { return null; }
 }
 
@@ -114,14 +120,14 @@ const ROW_IDS = ["tmax","rhmin","rhrec","wind","gust","pop"];   /* + dryltg via 
 const WX_ROUND = { tmax:1, rhmin:1, rhrec:1, wind:1, gust:1, pop:1, cape:1, precip:100 };
 function rnd(v, f){ return v == null ? null : Math.round(v * f) / f; }
 /* one zone-day of parsed fields -> {tier, score, dl, drv, sev{}, wx{}} */
-function rateDay(d, dayKey, normals){
+function rateDay(d, dayKey, normals, bands){
   const entries = [
     { id: "tmax",  s: C.devSev("tmax",  d.tmax,  dayKey, normals), w: C.THR_DEF.tmax.w },
     { id: "rhmin", s: C.devSev("rhmin", d.rhmin, dayKey, normals), w: C.THR_DEF.rhmin.w },
     { id: "rhrec", s: C.devSev("rhrec", d.rhrec, dayKey, normals), w: C.THR_DEF.rhrec.w },
-    { id: "wind",  s: C.sevFromThr(d.wind, C.THR_DEF.wind.t, C.THR_DEF.wind.asc), w: C.THR_DEF.wind.w },
-    { id: "gust",  s: C.sevFromThr(d.gust, C.THR_DEF.gust.t, C.THR_DEF.gust.asc), w: C.THR_DEF.gust.w },
-    { id: "pop",   s: C.sevFromThr(d.pop,  C.THR_DEF.pop.t,  C.THR_DEF.pop.asc),  w: C.THR_DEF.pop.w },
+    { id: "wind",  s: C.windSev(bands, "wind", dayKey, d.wind, C.THR_DEF.wind.t).s, w: C.THR_DEF.wind.w },
+    { id: "gust",  s: C.windSev(bands, "gust", dayKey, d.gust, C.THR_DEF.gust.t).s, w: C.THR_DEF.gust.w },
+    { id: "pop",   s: C.popSevRel(d.pop, C.wetFreqAt(bands, dayKey), C.THR_DEF.pop.t), w: C.THR_DEF.pop.w },
     { id: "dryltg", s: C.dryLightning(d).v, w: C.W_DRY }
   ];
   const sc = C.scoreContribs(entries);
@@ -138,13 +144,14 @@ function rateDay(d, dayKey, normals){
   };
 }
 function rateZone(zone, omResp, normals){
+  const bands = zone.bands || null;
   const one = S.parseOmOne(omResp);
   const days = one.days.slice(0, NDAYS);
   const t = [], s = [], dl = [], drv = [];
   const rows = {}; ROW_IDS.forEach(id => rows[id] = []);
   const wx = {}; Object.keys(WX_ROUND).forEach(f => wx[f] = []);
   for (const k of days){
-    const r = rateDay(one.d[k] || {}, k, normals);
+    const r = rateDay(one.d[k] || {}, k, normals, bands);
     t.push(r.tier); s.push(r.score); dl.push(r.dl); drv.push(r.drv);
     ROW_IDS.forEach(id => rows[id].push(r.sev[id]));
     Object.keys(WX_ROUND).forEach(f => wx[f].push(r.wx[f]));
@@ -164,10 +171,19 @@ async function run(){
   const zones = [], noClimo = [];
   for (const z of all){
     const N = loadClimo(z.id);
-    if (N) { z.normals = N; zones.push(z); } else noClimo.push(z.id);
+    if (N) { z.normals = N.normals; z.bands = N.bands; zones.push(z); } else noClimo.push(z.id);
     if (LIMIT && zones.length >= LIMIT) break;
   }
   console.log("zones in csv: " + all.length + " | with climo: " + zones.length + " | skipped (no climo): " + noClimo.length + " | bad coords: " + rz.badCoords.length);
+  const basisCounts = { wind_pctl: 0, wind_abs: 0, pop_rel: 0, pop_abs: 0 };
+  { const k0 = new Date().toISOString().slice(0, 10);
+    for (const z of zones){
+      if (z.bands && C.bandLadder(z.bands, "wind", k0)) basisCounts.wind_pctl++; else basisCounts.wind_abs++;
+      const wf = z.bands ? C.wetFreqAt(z.bands, k0) : null;
+      if (wf != null && wf >= 2) basisCounts.pop_rel++; else basisCounts.pop_abs++;
+    }
+    console.log("scoring basis: wind pctl " + basisCounts.wind_pctl + " / abs " + basisCounts.wind_abs +
+      " | pop rel " + basisCounts.pop_rel + " / abs " + basisCounts.pop_abs); }
   if (!zones.length) throw new Error("no zones with climatology found under " + CLIMO_DIR);
 
   const cfg = { key: (process.env.OM_API_KEY || "").trim() || undefined,
@@ -234,11 +250,12 @@ async function run(){
     pointset_version: "poi-v1",
     model: MODEL,
     composite: "national-v1 (tmax/rhmin/rhrec sigma + wind/gust/pop abs + dry-ltg CAPE path)",
-    ladder: "v83-normalT2-wgE1-dlR1b",
+    ladder: "v83nT2-W1-dlR1b",
     weights: { tmax:C.THR_DEF.tmax.w, rhmin:C.THR_DEF.rhmin.w, rhrec:C.THR_DEF.rhrec.w,
                wind:C.THR_DEF.wind.w, gust:C.THR_DEF.gust.w, pop:C.THR_DEF.pop.w, dryltg:C.W_DRY },
     days: daysRef || [],
     dropped_vars: drop.filter(x => typeof x === "string"),
+    basis: basisCounts,
     zones: out,
     failed: failed,
     no_climo: noClimo.length,

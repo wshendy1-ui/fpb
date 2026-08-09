@@ -56,7 +56,13 @@ function flatClimo(id, tmax, rhmin, rhmax){
                  rhmax: ring(rhmax), rhmaxSd: ring(5) } };
 }
 fs.writeFileSync(path.join(WORK, "climo", "TST001.json"), JSON.stringify(flatClimo("TST001", 80, 25, 70)));
-fs.writeFileSync(path.join(WORK, "climo", "TST002.json"), JSON.stringify(flatClimo("TST002", 80, 25, 70)));
+{ const c = flatClimo("TST002", 80, 25, 70);
+  const ring = v => { const o={}; const dim=[31,29,31,30,31,30,31,31,30,31,30,31];
+    for(let m=1;m<=12;m++) for(let d=1;d<=dim[m-1];d++) o[String(m).padStart(2,"0")+"-"+String(d).padStart(2,"0")]=v; return o; };
+  c.schema = "fpb-climo-2";
+  c.bands = { window:14, windWindow:21, windBasis:"gfs-hf", qkeys:[15,30,50,75,95],
+    windQ: ring([10,14,17,26,30]), gustQ: ring([12,16,20,30,36]), wetFreq: ring(8) };
+  fs.writeFileSync(path.join(WORK, "climo", "TST002.json"), JSON.stringify(c)); }
 fs.writeFileSync(path.join(WORK, "climo", "MISMAT.json"), JSON.stringify(flatClimo("MISMAT", 80, 25, 70)));
 fs.writeFileSync(path.join(WORK, "climo", "COMMA1.json"), JSON.stringify(flatClimo("COMMA1", 80, 25, 70)));
 fs.writeFileSync(path.join(WORK, "climo", "BADCRD.json"), JSON.stringify(flatClimo("BADCRD", 80, 25, 70)));
@@ -161,7 +167,7 @@ function runAsserts(){
   ck("comma-name-zone-rated", !!latest.zones.COMMA1 && latest.zones.COMMA1.t.every(v => v != null));
   ck("bad-coords-skipped", JSON.stringify(latest.bad_coords) === JSON.stringify(["BADCRD"]));
   ck("bad-coords-not-failed", latest.failed.indexOf("BADCRD") < 0);
-  ck("schema-v2", latest.schema === "fpb-national-2" && latest.ladder === "v83-normalT2-wgE1-dlR1b");
+  ck("schema-v2", latest.schema === "fpb-national-2" && latest.ladder === "v83nT2-W1-dlR1b");
   ck("weights-present", latest.weights && latest.weights.rhmin === 1.3 && latest.weights.dryltg === 1.1);
   ck("wx-day0-tmax", latest.zones.TST001.wx.tmax[0] === 80);
   ck("wx-cape", latest.zones.TST002.wx.cape[0] === 1500);
@@ -189,9 +195,18 @@ function runAsserts(){
   }
   /* TST002 — CAPE 1500 on a dry day: DL WATCH tier (R1b), lifts it above TST001 */
   ck("TST002-dl0", latest.zones.TST002.dl[0] === 2);   /* cape 1500 -> DL WATCH (R1b) */
+  ck("TST002-poprel", latest.zones.TST002.rows.pop[0] === 1);      /* pop 10 vs wf 8 -> r 1.25 */
+  ck("TST002-wind-pctl", latest.zones.TST002.rows.wind[0] === 0);  /* 3 mph < q15(10) */
+  ck("basis-field", latest.basis && latest.basis.wind_pctl === 2 && latest.basis.pop_rel === 2);  /* ORZ693+TST002 carry bands */
+  console.log("  [info] ORZ693 W1: wind/gust/pop rows =",
+    latest.zones.ORZ693.rows.wind[0], latest.zones.ORZ693.rows.gust[0], latest.zones.ORZ693.rows.pop[0],
+    "| t0 =", latest.zones.ORZ693.t[0], "s0 =", latest.zones.ORZ693.s[0],
+    "| basis =", JSON.stringify(latest.basis));
   ck("TST002-hotter-than-TST001", latest.zones.TST002.s[0] > latest.zones.TST001.s[0]);
   /* ORZ693 — +2σ hot, −2σ dry, CAPE 1200 dry, windy: expect top tier day 0 */
-  ck("ORZ693-day0-T3-R1b", latest.zones.ORZ693.t[0] === 3);  /* watch (sev2) not bolt: EXTREME -> V HIGH, intended */
+  ck("ORZ693-wgp-W1", latest.zones.ORZ693.rows.wind[0] === 4 && latest.zones.ORZ693.rows.gust[0] === 4 &&
+     latest.zones.ORZ693.rows.pop[0] === 3);   /* 22mph > its own q95(14.4); 34 > gust q95(30); pop5/wf9.1 = r.549 */
+  ck("ORZ693-day0-W1", latest.zones.ORZ693.t[0] === 4 && latest.zones.ORZ693.s[0] === 3);
   ck("ORZ693-dl0-watch", latest.zones.ORZ693.dl[0] === 2);   /* cape 1200 -> DL WATCH (R1b) */
   ck("ORZ693-driver", ["rhmin", "tmax", "dryltg", "gust", "wind"].includes(latest.zones.ORZ693.drv[0]));
   /* WYZ275 — cool wet: day-0 tier at or below its mild days */

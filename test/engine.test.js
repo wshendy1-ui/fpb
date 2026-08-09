@@ -230,6 +230,22 @@ for (const [v,want] of [[14.9,0],[15,1],[21.9,1],[22,2],[29.9,2],[30,3],[39.9,3]
   eq("band-fallback", [fb.basis, fb.s], ["abs", 1]);          /* 10 mph vs E1 [8,13,18,25] */
   eq("band-gust", C.windSev(bands,"gust","2026-07-15",26.2,C.THR_DEF.gust.t).s, 3);
   eq("wetFreqAt", [C.wetFreqAt(bands,"2026-07-15"), C.wetFreqAt(bands,"2026-02-01"), C.wetFreqAt(null,"2026-07-15")], [7.3, null, null]);
+
+  /* v1.5 — pop-rel ratio ladder, exact boundaries + fallbacks */
+  const PA = C.THR_DEF.pop.t;
+  eq("poprel-wet",      C.popSevRel(12, 8, PA), 0);      /* r 1.5 */
+  eq("poprel-r1.49",    C.popSevRel(11.9, 8, PA), 1);
+  eq("poprel-r1.05",    C.popSevRel(8.4, 8, PA), 1);
+  eq("poprel-normal",   C.popSevRel(8.3, 8, PA), 2);     /* r ~1.04 */
+  eq("poprel-r0.55",    C.popSevRel(4.4, 8, PA), 2);
+  eq("poprel-dry",      C.popSevRel(4.3, 8, PA), 3);
+  eq("poprel-r0.25",    C.popSevRel(2.0, 8, PA), 3);
+  eq("poprel-verydry",  C.popSevRel(1.9, 8, PA), 4);
+  eq("poprel-humid-anom", C.popSevRel(5, 45, PA), 4);    /* Atlanta case */
+  eq("poprel-arid-normal", C.popSevRel(5, 6, PA), 2);    /* Vegas case */
+  eq("poprel-wf-fallback", C.popSevRel(5, 1.9, PA), C.sevFromThr(5, PA, 0));
+  eq("poprel-wf-null",     C.popSevRel(5, null, PA), C.sevFromThr(5, PA, 0));
+  eq("poprel-pop-null",    C.popSevRel(null, 8, PA), null);
 }
 
 for (const [d,want] of [
