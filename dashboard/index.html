@@ -928,7 +928,7 @@ const OM_MODELS_FULL=["gfs_seamless","ecmwf_ifs025","icon_seamless","gem_seamles
 const OM_MODELS_LEAN=["gfs_seamless","ecmwf_ifs025"];
 function omModels(){return state.ensMode==="full"?OM_MODELS_FULL:OM_MODELS_LEAN;}
 function ensembleLab(){return state.ensMode==="full"?((OM_MODELS_FULL.length+1)+" · full ensemble"):((OM_MODELS_LEAN.length+1)+" · lean (GFS+ECMWF+NWS)");}
-const APP_VERSION="110"; /* PWA — bump together with sw.js CACHE on every release */
+const APP_VERSION="111"; /* PWA — bump together with sw.js CACHE on every release */
 const MAX_RAWS=5; /* v84: station cap per area — API discipline; pickers rank active-first, then nearest */
 const PDS_RE=/particularly\s+dangerous\s+situation/i; /* v84: PDS wording inside a Red Flag Warning — display only */
 /* ==================== v86: narrative pools — driven by / held in check ==================== */
@@ -4568,7 +4568,7 @@ function renderMobZones(root){
   const cur=area();
   /* v109: three named sections instead of one long scroll — the search was buried under the
      setup panel and the favourites list. */
-  const SEC=[["setup","This zone"],["pins","My zones"],["find","Find a zone"]];
+  const SEC=[["setup","This Zone"],["pins","My Zones"],["find","Find A Zone"]];
   let h='<div class="mseg" style="margin:2px 0 10px">'
     +SEC.map(([k,lab])=>'<button data-sec="'+k+'"'+(MOB_Z.sec===k?' class="on"':'')+'>'+lab+'</button>').join("")
     +'</div>';
@@ -4579,7 +4579,7 @@ function renderMobZones(root){
     root.innerHTML=h;mobZonesWire(root);return;
   }
   if(MOB_Z.sec==="pins"){
-    h+='<div style="padding:2px 2px 8px"><div class="mzone" style="font-size:21px">My zones</div>'
+    h+='<div style="padding:2px 2px 8px"><div class="mzone" style="font-size:21px">My Zones</div>'
       +'<div class="mnote" style="margin-top:2px">'+pins.length+' of '+MOB_PIN_MAX+' favourites'
       +(homeZone()?(' \u00b7 home is '+mobEsc(homeZone())):'')+'</div></div>';
     h+='<div style="display:flex;flex-direction:column;gap:7px">';
@@ -4588,7 +4588,7 @@ function renderMobZones(root){
     h+='</div>';
     root.innerHTML=h;mobZonesWire(root);return;
   }
-  h+='<div style="padding:2px 2px 8px"><div class="mzone" style="font-size:21px">Find a zone</div>'
+  h+='<div style="padding:2px 2px 8px"><div class="mzone" style="font-size:21px">Find A Zone</div>'
     +'<div class="mnote" style="margin-top:2px">All '+list.length+' fire weather zones \u2014 tap one to load it</div></div>'
     +'<input class="mzsearch" id="mobZq" placeholder="Search zone id or name\u2026" value="'+mobEsc(MOB_Z.q)+'" autocomplete="off" autocapitalize="characters">'
     +'<select class="mzstate mzstate-big" id="mobZst"><option value="">Choose a state</option>'
