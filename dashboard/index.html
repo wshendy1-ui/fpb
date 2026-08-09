@@ -431,6 +431,7 @@ body.mobOn{overflow:hidden}
 <script src="leaflet/leaflet.js"></script>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1b2530">
+<!-- v110: set from the stored theme at boot; iOS reads the apple style at launch -->
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Fire Potential">
@@ -927,7 +928,7 @@ const OM_MODELS_FULL=["gfs_seamless","ecmwf_ifs025","icon_seamless","gem_seamles
 const OM_MODELS_LEAN=["gfs_seamless","ecmwf_ifs025"];
 function omModels(){return state.ensMode==="full"?OM_MODELS_FULL:OM_MODELS_LEAN;}
 function ensembleLab(){return state.ensMode==="full"?((OM_MODELS_FULL.length+1)+" · full ensemble"):((OM_MODELS_LEAN.length+1)+" · lean (GFS+ECMWF+NWS)");}
-const APP_VERSION="109"; /* PWA — bump together with sw.js CACHE on every release */
+const APP_VERSION="110"; /* PWA — bump together with sw.js CACHE on every release */
 const MAX_RAWS=5; /* v84: station cap per area — API discipline; pickers rank active-first, then nearest */
 const PDS_RE=/particularly\s+dangerous\s+situation/i; /* v84: PDS wording inside a Red Flag Warning — display only */
 /* ==================== v86: narrative pools — driven by / held in check ==================== */
@@ -3936,10 +3937,24 @@ function themeIsDark(){
   if(m==="light")return false;
   try{return !!(window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches);}catch(e){return false;}
 }
+/* v110: shell colours the OS also paints with */
+const MOB_BG_LIGHT="#f5ead8",MOB_BG_DARK="#100e0a",DESK_THEME_COLOR="#1b2530";
+function setMeta(name,content){
+  let m=document.querySelector('meta[name="'+name+'"]');
+  if(!m){m=document.createElement("meta");m.setAttribute("name",name);document.head.appendChild(m);}
+  m.setAttribute("content",content);
+}
+/* Android/Chrome repaint the status bar from theme-color immediately. iOS reads the
+   apple-* style when the installed app launches, so a change there lands next launch. */
+function applyStatusBar(dark,onMobile){
+  setMeta("theme-color",onMobile?(dark?MOB_BG_DARK:MOB_BG_LIGHT):DESK_THEME_COLOR);
+  setMeta("apple-mobile-web-app-status-bar-style",(onMobile&&dark)?"black":"default");
+}
 function applyTheme(){
   const dark=themeIsDark()&&mobActive();
   const r=$("mobRoot");if(r)r.classList.toggle("dark",dark);
   document.body.classList.toggle("dark",dark);
+  applyStatusBar(dark,mobActive());
 }
 function setTheme(m){state.theme=m;persist();applyTheme();renderMob();}
 /* v104: page zoom stays off outside the map. touch-action alone does not stop pinch on iOS

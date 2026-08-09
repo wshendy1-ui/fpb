@@ -4,7 +4,7 @@
    Data policy: weather / FEMS / NWS requests never touch this cache. The app layer owns
    staleness (45-min weather cache, FEMS age pills) — the worker only guarantees the shell
    and the zone layer open on a ridgetop with no signal. */
-const CACHE = "fpd-shell-v109";
+const CACHE = "fpd-shell-v110";
 const SHELL = [
   "./",
   "index.html",
