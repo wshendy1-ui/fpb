@@ -307,7 +307,13 @@ body.mobOn.dark{background:#100e0a}
 #mobRoot .mpill{font:700 10.5px ui-monospace,Menlo,monospace;border:1px solid var(--mline);border-radius:999px;padding:3px 9px;color:var(--mlab);white-space:nowrap;background:none;cursor:default}
 #mobRoot button.mpill{cursor:pointer}
 #mobRoot .mzone{font:400 24px/1.12 Caprasimo,serif;margin-top:4px}
-#mobRoot .mhero{font:400 38px/1 Caprasimo,serif}
+#mobRoot .mhero{font:400 38px/1 Caprasimo,serif;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* v112: LOW/HIGH fit at full size; MODERATE and EXTREME need a step down, VERY HIGH more,
+   now that the Wx/Fuels pills share the row */
+#mobRoot .mhero.h8{font-size:30px}
+#mobRoot .mhero.h9{font-size:25px}
+#mobRoot .mheroRow{display:flex;align-items:center;gap:10px;margin-top:8px;min-width:0}
+#mobRoot .mheroRow>*{min-width:0}
 #mobRoot .mmono{font:700 20px ui-monospace,Menlo,monospace}
 #mobRoot .mtag{font:800 9px Figtree,sans-serif;letter-spacing:.06em;color:#fff;border-radius:6px;padding:2px 6px;flex:none}
 #mobRoot .mgrid{display:grid;grid-template-columns:1fr 1fr;gap:7px}
@@ -928,7 +934,7 @@ const OM_MODELS_FULL=["gfs_seamless","ecmwf_ifs025","icon_seamless","gem_seamles
 const OM_MODELS_LEAN=["gfs_seamless","ecmwf_ifs025"];
 function omModels(){return state.ensMode==="full"?OM_MODELS_FULL:OM_MODELS_LEAN;}
 function ensembleLab(){return state.ensMode==="full"?((OM_MODELS_FULL.length+1)+" · full ensemble"):((OM_MODELS_LEAN.length+1)+" · lean (GFS+ECMWF+NWS)");}
-const APP_VERSION="111"; /* PWA — bump together with sw.js CACHE on every release */
+const APP_VERSION="112"; /* PWA — bump together with sw.js CACHE on every release */
 const MAX_RAWS=5; /* v84: station cap per area — API discipline; pickers rank active-first, then nearest */
 const PDS_RE=/particularly\s+dangerous\s+situation/i; /* v84: PDS wording inside a Red Flag Warning — display only */
 /* ==================== v86: narrative pools — driven by / held in check ==================== */
@@ -4154,10 +4160,11 @@ function renderMob(){
     +'<div class="mkick" style="min-width:0">'+mobEsc(isToday?"Today":(hL.dn+" "+hL.dd))+' \u2014 significant fire potential</div>'
     +'<span style="font:600 10.5px ui-monospace,Menlo,monospace;color:var(--mmut);white-space:nowrap">'
     +mobEsc(has?fx.days[si].slice(5):"")+(isToday?"":" \u00b7 day "+(si+1))+'</span></div>'
-    +'<div style="display:flex;align-items:center;gap:14px;margin-top:8px">'
-    +'<div class="mhero" style="color:'+(ht==null?"var(--mmut)":mobLv(ht))+'">'+(ht==null?"NO DATA":ADJ[ht])+'</div>'
+    +'<div class="mheroRow">'
+    +'<div class="mhero'+mobHeroFit(ht==null?"NO DATA":ADJ[ht])+'" style="color:'+(ht==null?"var(--mmut)":mobLv(ht))+'">'
+    +(ht==null?"NO DATA":ADJ[ht])+'</div>'
     +mobSubPills(hd)
-    +'<div style="margin-left:auto;text-align:right"><div class="mmono">'+(hd&&hd.score!=null?hd.score.toFixed(2):"\u2014")+'</div>'
+    +'<div style="margin-left:auto;text-align:right;flex:none"><div class="mmono">'+(hd&&hd.score!=null?hd.score.toFixed(2):"\u2014")+'</div>'
     +'<div style="font-size:9.5px;color:var(--mmut);letter-spacing:.06em;font-weight:700">COMPOSITE 0\u20134</div></div></div>'
     +'<div style="display:flex;flex-direction:column;gap:6px;margin-top:12px;border-top:1px solid var(--mline2);padding-top:10px">';
   if(drv.length)for(const s of drv)h+='<div style="display:flex;gap:8px;align-items:baseline">'
@@ -4828,6 +4835,11 @@ function mobLinksOpen(){
 }
 /* v109: the composite is two halves — weather and fuels. Showing them beside the headline
    answers "is this a wind day or a fuels day" without opening the detail sheet. */
+/* v112: pick a size class from the word length — full word, no truncation */
+function mobHeroFit(txt){
+  const L=String(txt||"").length;
+  return L>=9?" h9":L>=8?" h8":"";
+}
 function mobSubPills(hd){
   if(!hd)return "";
   const row=(lab,val)=>{
@@ -4837,7 +4849,7 @@ function mobSubPills(hd){
       +'<span class="mchip" style="background:'+(lv==null?"var(--mnt)":mobFill(lv,1))+';color:'+mobPillInk(lv)+'">'
       +(lv==null?"\u2014":MOB_ADJ_P[lv])+'</span></div>';
   };
-  return '<div style="display:flex;flex-direction:column;gap:5px;margin-left:12px">'
+  return '<div style="display:flex;flex-direction:column;gap:5px;margin-left:10px;flex:none">'
     +row("WX",hd.wx)+row("FUELS",hd.fuels)+'</div>';
 }
 function mobSheetOpen(){
