@@ -934,7 +934,7 @@ const OM_MODELS_FULL=["gfs_seamless","ecmwf_ifs025","icon_seamless","gem_seamles
 const OM_MODELS_LEAN=["gfs_seamless","ecmwf_ifs025"];
 function omModels(){return state.ensMode==="full"?OM_MODELS_FULL:OM_MODELS_LEAN;}
 function ensembleLab(){return state.ensMode==="full"?((OM_MODELS_FULL.length+1)+" · full ensemble"):((OM_MODELS_LEAN.length+1)+" · lean (GFS+ECMWF+NWS)");}
-const APP_VERSION="112"; /* PWA — bump together with sw.js CACHE on every release */
+const APP_VERSION="113"; /* PWA — bump together with sw.js CACHE on every release */
 const MAX_RAWS=5; /* v84: station cap per area — API discipline; pickers rank active-first, then nearest */
 const PDS_RE=/particularly\s+dangerous\s+situation/i; /* v84: PDS wording inside a Red Flag Warning — display only */
 /* ==================== v86: narrative pools — driven by / held in check ==================== */
@@ -1716,7 +1716,7 @@ function updateThrPill(){
     +"\nERC breakpoints: "+(erc?"set":"PLACEHOLDER — calibrate or enter FDOP values")
     +"\nFuels percentile ladders (model "+(p.fuelModel||"Y")+"): "+(lad?("set — calibrated "+((p.climo&&p.climo.at)||"?")):"not calibrated for this model — run Calibrate FUELS Indices")
     +"\nHDW percentiles: "+(hdw?("set — entered "+((p.hdwClimo&&p.hdwClimo.at)||"?")):"not set — open HDW forecast \u2197 and enter the two anchors beside the button")
-    +"\nWX normals: "+(p.wxNormals?("set — "+p.wxNormals.at+(p.wxNormals.src==="climo"?" · FPB climo (zone point, means-only — recalibrate locally for σ + your point)":"")):"not set — temp/RH rows fall back to absolute thresholds");}
+    +"\nWX normals: "+(p.wxNormals?("set — "+p.wxNormals.at+(p.wxNormals.src==="climo"?" · FPB climo (zone point, means-only — recalibrate locally for σ + your point)":"")):"not set — temp/RH rows fall back to absolute thresholds")+"\nWind/gust bands: "+(p.bands?("percentile scoring active — wind "+(p.bands.windBasis||"?")+" "+((p.bands.windSpan&&(p.bands.windSpan.startY+"–"+p.bands.windSpan.endY))||"?")+" · gust ERA5 "+((p.bands.span&&(p.bands.span.startY+"–"+p.bands.span.endY))||"?")):"none — wind/gust on absolute ladders");}
 async function jget(url,opts){const r=await fetch(url,opts||{});if(!r.ok)throw new Error(r.status+" "+url);return r;}
 function isRateErr(e){return /(^|\D)429(\D|$)|too many|rate.?limit|unable to perform query/i.test(String(e&&e.message||e));}
 function coolBtn(id,sec){const b=$(id);if(!b)return;
@@ -3435,6 +3435,54 @@ function simpleAuto(id,field,fmt){return{
   sev:(i,v)=>sevFromThr(v,T(id).t,T(id).asc),w:()=>T(id).w,editable:true};}
 const COMPASS16=["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"];
 function compass16(deg){return COMPASS16[Math.round(((deg%360)+360)%360/22.5)%16];}
+/* ===================== v113: percentile wind/gust from climo bands =====================
+   ENGINE.md v1.3 / README-WIND.md: ladder is [q15,q30,q75,q95] — the same exceedance
+   structure as the sigma ladder, so a median day scores sev 2. Fallback chain is
+   bands -> absolute E1 thresholds, and the basis used is always reportable. */
+const BAND_LADDER_IDX=[0,1,3,4];
+function bandsOf(p){p=p||area();return (p&&p.bands)||null;}
+function bandFor(id,i){
+  const B=bandsOf();if(!B)return null;
+  const day=fx.days[i];if(!day)return null;
+  const key=String(day).slice(5);            /* "MM-DD" */
+  const q=(id==="gust")?B.gustQ:B.windQ;
+  const b=q&&q[key];
+  return (Array.isArray(b)&&b.length===5&&b[4]!=null)?b:null;
+}
+function bandLadder(b){return BAND_LADDER_IDX.map(k=>b[k]);}
+/* where a value sits in the 5-point band, interpolated between the published quantiles */
+function bandPctl(b,v,qkeys){
+  if(!b||v==null)return null;
+  const Q=qkeys||[15,30,50,75,95];
+  if(v<=b[0])return Q[0];
+  if(v>=b[4])return Q[4];
+  for(let k=0;k<4;k++){
+    if(v<=b[k+1]){
+      const a=b[k],c=b[k+1];
+      const f=c>a?(v-a)/(c-a):0;
+      return Q[k]+(Q[k+1]-Q[k])*f;
+    }
+  }
+  return Q[4];
+}
+/* severity for wind/gust: percentile band when available, absolute ladder otherwise */
+function bandSev(id,i,v){
+  if(v==null)return null;
+  const b=bandFor(id,i);
+  if(b)return sevFromThr(v,bandLadder(b),1);
+  return sevFromThr(v,T(id).t,T(id).asc);
+}
+function bandBasis(id,i){return bandFor(id,i)?"pctl":"abs";}
+function bandSub(id,i,v){
+  const b=bandFor(id,i);
+  if(!b||v==null)return null;
+  const B=bandsOf();
+  const p=bandPctl(b,v,B&&B.qkeys);
+  if(p==null)return null;
+  const r=Math.round(p);
+  return (v>=b[4]?"\u2265":"~")+r+ordSuffix(r)+" %ile";
+}
+function ordSuffix(x){const t=x%10,h=x%100;return (h>=11&&h<=13)?"th":t===1?"st":t===2?"nd":t===3?"rd":"th";}
 function pctlFromQ(q,v){
   if(!q||q.length!==21||v==null)return null;
   if(v<=q[0])return 0;if(v>=q[20])return 100;
@@ -3597,8 +3645,18 @@ const ROWS=[
    desc:"Lowest relative humidity of the day, scored normal-centered: at normal rates T2, moister than normal earns down (T1 at +0.5σ, T0 at +1σ moister), drier climbs (T3 at +0.75σ, T4 at +1.5σ drier). Sigma scoring means a 7-point drop counts far more where RHmin barely varies than where it swings widely. Recalibrate a means-only zone to enable σ; before any calibration it falls back to absolute thresholds."})),
  devWrap(Object.assign(simpleAuto("rhrec","rhrec",r0),{nm:"Overnight RH recovery",un:"% max",src:"auto",
    desc:"Highest RH reached overnight, scored normal-centered: normal recovery rates T2, better than normal earns down (T1/T0 at +0.5/+1σ better), poorer recovery climbs (T3 at +0.75σ, T4 at +1.5σ below normal). Poor recovery keeps fine fuels receptive around the clock. Recalibrate a means-only zone to enable σ; before any calibration it falls back to absolute thresholds."})),
- Object.assign(simpleAuto("wind","wind",r0),{nm:"Wind (sustained max)",un:"mph 10-m",src:"auto"}),
- Object.assign(simpleAuto("gust","gust",r0),{nm:"Wind gust (max)",un:"mph",src:"auto"}),
+ /* v113: both rows score against the zone's own day-of-year distribution when bands are
+    present; the absolute ladder remains the fallback and stays editable in Settings. */
+ Object.assign(simpleAuto("wind","wind",r0),{nm:"Wind (sustained max)",un:"mph 10-m",src:"auto",
+   sev:(i,v)=>bandSev("wind",i,v),
+   val:i=>{const o=ovr(i,"wind");const v=o!==undefined?num(o):dd(i).wind;
+     return{v:v,txt:r0(v),from:o!==undefined?"ov":null,sub:bandSub("wind",i,v)};},
+   desc:"Daily maximum sustained 10-m wind. With zone bands installed this scores against the zone's own day-of-year distribution (forecast-basis GFS climatology, 2022\u20132025): a median day for the date rates T2, the 75th\u201395th percentile climbs to T3, above the 95th is T4. Without bands it falls back to the absolute mph ladder, which reads the same everywhere and badly under-reads calm zones."}),
+ Object.assign(simpleAuto("gust","gust",r0),{nm:"Wind gust (max)",un:"mph",src:"auto",
+   sev:(i,v)=>bandSev("gust",i,v),
+   val:i=>{const o=ovr(i,"gust");const v=o!==undefined?num(o):dd(i).gust;
+     return{v:v,txt:r0(v),from:o!==undefined?"ov":null,sub:bandSub("gust",i,v)};},
+   desc:"Daily maximum wind gust. Scored against the zone's own day-of-year gust distribution when bands are installed (ERA5 climatology, 1996\u20132025 \u2014 a different basis and depth from the wind row, which uses forecast-basis GFS). Falls back to the absolute mph ladder."}),
  {id:"wdir",nm:"Wind direction (dominant)",un:"16-pt · deg",src:"auto",editable:false,w:()=>0,
   val:i=>{const day=fx.days[i];let U=0,V=0,n=0;
     (OM_S.samples||[]).forEach(s=>{const o=s.d&&s.d.d&&s.d.d[day];const wd=o?o.wdir:null;
@@ -4052,12 +4110,30 @@ function zidOf(p){if(!p)return null;
 function climoInstall(p,j){
   if(!j||j.schema!=="fpb-climo-2"||!j.wxNormals||!j.wxNormals.tmax||!j.wxNormals.rhmin)return false;
   const w=j.wxNormals;
-  p.wxNormals={at:w.at,yrs:w.yrs,span:w.span,lat:w.lat,lon:w.lon,n:w.n,
-    tmax:w.tmax,rhmin:w.rhmin,src:"climo"};
-  persist();return true;}
+  let did=false;
+  /* v113: an area that already has normals may still be missing bands, so this can run a
+     second time — but it must never clobber a local calibration (σ + the user's own point)
+     with the zone-point means. Each block installs only what is absent. */
+  if(!p.wxNormals){
+    p.wxNormals={at:w.at,yrs:w.yrs,span:w.span,lat:w.lat,lon:w.lon,n:w.n,
+      tmax:w.tmax,rhmin:w.rhmin,src:"climo"};
+    did=true;
+  }
+  /* day-of-year wind/gust percentile bands, kept whole rather than reduced to one ladder:
+     the ladder is per DATE — 693's wind q50 falls 8.9 -> 6.5 mph between July and October,
+     so a single seeded threshold set would under-read the shoulder season. */
+  const b=j.bands;
+  if(!p.bands&&b&&b.windQ&&b.gustQ&&Array.isArray(b.qkeys)){
+    p.bands={qkeys:b.qkeys,windQ:b.windQ,gustQ:b.gustQ,wetFreq:b.wetFreq||null,
+      windBasis:b.windBasis||null,windSpan:b.windSpan||null,windWindow:b.windWindow||null,
+      span:b.span||null,window:b.window||null,src:"climo",at:w.at};
+    did=true;
+  }
+  if(did)persist();
+  return did;}
 function maybeClimo(p){
   if(!p)return "no-area";
-  if(p.wxNormals)return "has-normals";
+  if(p.wxNormals&&p.bands)return "has-normals"; /* v113: re-fetch once to pick up bands */
   const z=zidOf(p);if(!z)return "no-zone";
   if(CLIMO_TRIED[z])return "tried";CLIMO_TRIED[z]=1;
   (async()=>{for(const u of CLIMO_URLS){try{
