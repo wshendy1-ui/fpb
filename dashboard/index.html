@@ -942,7 +942,7 @@ const OM_MODELS_FULL=["gfs_seamless","ecmwf_ifs025","icon_seamless","gem_seamles
 const OM_MODELS_LEAN=["gfs_seamless","ecmwf_ifs025"];
 function omModels(){return state.ensMode==="full"?OM_MODELS_FULL:OM_MODELS_LEAN;}
 function ensembleLab(){return state.ensMode==="full"?((OM_MODELS_FULL.length+1)+" · full ensemble"):((OM_MODELS_LEAN.length+1)+" · lean (GFS+ECMWF+NWS)");}
-const APP_VERSION="114"; /* PWA — bump together with sw.js CACHE on every release */
+const APP_VERSION="115"; /* PWA — bump together with sw.js CACHE on every release */
 const MAX_RAWS=5; /* v84: station cap per area — API discipline; pickers rank active-first, then nearest */
 const PDS_RE=/particularly\s+dangerous\s+situation/i; /* v84: PDS wording inside a Red Flag Warning — display only */
 /* ==================== v86: narrative pools — driven by / held in check ==================== */
@@ -4222,7 +4222,7 @@ function renderMob(){
   /* v98: the map owns a real DOM node; when we navigate away the node is replaced by
      innerHTML, so drop the Leaflet instance rather than leave it bound to a dead element */
   if(MOB_TAB.v!=="map"&&MOB_MAP.m){try{MOB_MAP.m.remove();}catch(e){}
-    MOB_MAP.m=null;MOB_MAP.zones=null;MOB_MAP.stns=null;MOB_MAP.sel=null;}
+    MOB_MAP.m=null;MOB_MAP.el=null;MOB_MAP.zones=null;MOB_MAP.stns=null;MOB_MAP.sel=null;}
   if(MOB_TAB.v==="matrix"){renderMobMatrix(root);return;}
   if(MOB_TAB.v==="zones"){renderMobZones(root);return;}
   if(MOB_TAB.v==="map"){renderMobMap(root);return;}
@@ -4381,7 +4381,7 @@ function renderMob(){
 /* v98: mobile map. A second Leaflet instance living in the mobile shell — the desktop
    map keeps its own container and workflow untouched. Zone outlines come from the same
    cached zones_west.geojson (fwzLoadGeo), so nothing is fetched twice. */
-const MOB_MAP={m:null,zones:null,stns:null,sel:null,err:null,tried:false};
+const MOB_MAP={m:null,el:null,zones:null,stns:null,sel:null,err:null,tried:false};
 /* v114: the national choropleth. One static file, precomputed by the daily cron —
    no API call from this device, so it costs nothing however many people open it.
    It is the NATIONAL composite (7 rows) and will differ from this app's own rating
@@ -4471,11 +4471,19 @@ function mobMapMarkStations(){
 async function mobMapInit(){
   const host=$("mobMap");
   if(!host||typeof L==="undefined"){MOB_MAP.err="Map library unavailable offline \u2014 use the Zones tab to search and resolve.";renderMob();return;}
-  if(MOB_MAP.m){setTimeout(()=>{try{MOB_MAP.m.invalidateSize();}catch(e){}},60);return;}
+  if(MOB_MAP.m){
+    /* v115: MOB_MAP.m being set is not proof the map is still on screen. If the node we
+       built into is no longer the one in the document, innerHTML replaced it and the
+       instance is orphaned — rebuild rather than poking a detached container. */
+    if(MOB_MAP.el===host){setTimeout(()=>{try{MOB_MAP.m.invalidateSize();}catch(e){}},60);return;}
+    try{MOB_MAP.m.remove();}catch(e){}
+    MOB_MAP.m=null;MOB_MAP.el=null;MOB_MAP.zones=null;MOB_MAP.stns=null;
+  }
   try{
     const p=area();
     const c=(p&&p.lat!=null)?[p.lat,p.lon]:[45.5,-117.5];
     MOB_MAP.m=L.map(host,{zoomControl:false,attributionControl:true}).setView(c,(p&&p.lat!=null)?8:6);
+    MOB_MAP.el=host;
     L.control.zoom({position:"topright"}).addTo(MOB_MAP.m); /* v99: bottom-right is where the selection card lives */
     L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:15,attribution:"&copy; OpenStreetMap"}).addTo(MOB_MAP.m);
     const gj=await fwzLoadGeo();
@@ -4498,7 +4506,7 @@ async function mobMapInit(){
     setTimeout(()=>{try{MOB_MAP.m.invalidateSize();}catch(e){}},80);
   }catch(e){
     MOB_MAP.err="Zone layer unavailable: "+String(e&&e.message||e);
-    if(MOB_MAP.m){try{MOB_MAP.m.remove();}catch(e2){}MOB_MAP.m=null;MOB_MAP.zones=null;MOB_MAP.stns=null;}
+    if(MOB_MAP.m){try{MOB_MAP.m.remove();}catch(e2){}MOB_MAP.m=null;MOB_MAP.el=null;MOB_MAP.zones=null;MOB_MAP.stns=null;}
     renderMob();}}
 function mobMapSelUi(){
   const box=$("mobMapSel");if(!box)return;
@@ -4521,6 +4529,10 @@ function renderMobMap(root){
     +'<div class="mnote" style="margin-top:2px">Tap a zone outline to select it, then load it \u2014 stations, calibration and normals follow.</div></div>';
   if(MOB_MAP.err){
     h+='<div class="mcard"><div class="mnote" style="color:#a13c1c">'+mobEsc(MOB_MAP.err)+'</div></div>';
+    /* v115: this render emits no #mobMap, so a live instance has nowhere to go — release
+       it here rather than letting innerHTML orphan it */
+    if(MOB_MAP.m){try{MOB_MAP.m.remove();}catch(e){}
+      MOB_MAP.m=null;MOB_MAP.el=null;MOB_MAP.zones=null;MOB_MAP.stns=null;}
     root.innerHTML=h;return;}
   h+='<div id="mobMapWrap"><div id="mobMap"></div><div id="mobMapSel"></div></div>';
   /* v114: day chips drive the choropleth; the tier arrays already carry 7 days */
@@ -4547,7 +4559,27 @@ function renderMobMap(root){
       :'')
     +'This is the <b>national composite</b> \u2014 7 rows, no fuels. Your zone\u2019s rating on the Brief scores 23 rows '
     +'and is the one to brief off. Pinch to zoom the map; the rest of the app stays fixed.</div>';
+  /* v115: carry the live map across the rebuild. Detaching it first means innerHTML
+     cannot destroy it, and putting it back preserves the Leaflet instance along with
+     its tiles, zone layer, station markers, and current pan/zoom. Without this, every
+     re-render while this tab is open blanked the map. */
+  let _live=null;
+  if(MOB_MAP.m&&MOB_MAP.el&&MOB_MAP.el.parentNode){
+    _live=MOB_MAP.el;
+    _live.parentNode.removeChild(_live);
+  }
   root.innerHTML=h;
+  if(_live){
+    const _slot=$("mobMap");
+    if(_slot&&_slot.parentNode){
+      _slot.parentNode.replaceChild(_live,_slot);
+      setTimeout(()=>{try{MOB_MAP.m.invalidateSize();}catch(e){}},60);
+    }else{
+      /* no slot in this render (error state) — the instance has nowhere to live */
+      try{MOB_MAP.m.remove();}catch(e){}
+      MOB_MAP.m=null;MOB_MAP.el=null;MOB_MAP.zones=null;MOB_MAP.stns=null;
+    }
+  }
   mobMapInit();
   mobMapSelUi();
   /* seed from the persisted copy, then refresh on the same staleness gate as everything else */
