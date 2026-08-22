@@ -261,6 +261,16 @@ async function run(){
     no_climo: noClimo.length,
     bad_coords: rz.badCoords
   };
+  /* A run that rated nothing is a failure, not a result. Publishing it replaced a
+     good latest.json with an empty one and — because the workflow's idempotence
+     guard only tests for file existence — locked out every remaining slot that day.
+     Exit non-zero instead so the map keeps serving the last good file and Actions
+     goes red. --allow-empty overrides for deliberate probes. */
+  if (Object.keys(out).length === 0 && !process.argv.includes("--allow-empty")) {
+    console.error("ABORT: 0 zones rated (" + failed.length + " failed) — refusing to overwrite latest.json.");
+    if (failed.length) console.error("first failures: " + failed.slice(0, 5).join(", "));
+    process.exit(1);
+  }
   fs.mkdirSync(OUT_DIR, { recursive: true });
   const dated = path.join(OUT_DIR, (daysRef ? daysRef[0] : new Date().toISOString().slice(0, 10)) + ".json");
   fs.writeFileSync(dated, JSON.stringify(doc));

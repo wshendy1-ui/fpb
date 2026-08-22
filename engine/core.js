@@ -181,6 +181,31 @@ function windSev(bands,kind,dateKey,v,fallbackThr){
   if(lad)return {s:sevFromThr(v,lad,1),basis:"pctl",lad:lad};
   return {s:sevFromThr(v,fallbackThr,1),basis:"abs",lad:fallbackThr};
 }
+/* PoP scored RELATIVE to how often this zone is actually wet on this date.
+   A 30% chance of precipitation means something very different where 9% of
+   mid-July days are wet (ORZ693) than where 34% are (the same zone in
+   November). ratio = PoP / wetFreq, so ratio 1.0 is "normal wetness for the
+   date" and lands on sev 2 — the same normal-centered recentering the sigma
+   and wind ladders use. Higher ratio = wetter than normal = dampened.
+
+   POP_REL_THR is descending (asc:0) like the absolute PoP ladder it replaces:
+     >=2.00  sev 0   twice the normal chance of wet
+     >=1.25  sev 1
+     >=0.75  sev 2   normal
+     >=0.40  sev 3
+      <0.40  sev 4   far drier than this date usually runs
+
+   NOT YET CALIBRATED — these thresholds are a first cut (memo #3 checkpoint 4
+   validates them against archived ratings). PoP carries w=0.4 of the national
+   composite's 6.6 total, so the blast radius is ~6%. Zones with no bands, or a
+   wetFreq too small to divide by, fall back to the absolute ladder. */
+const POP_REL_THR=[2.00,1.25,0.75,0.40];
+const POP_REL_MIN_WETFREQ=2;   /* below this, the ratio is numerically unstable */
+function popSevRel(pop,wetFreq,fallbackThr){
+  if(pop==null||isNaN(pop))return null;
+  if(wetFreq==null||!(wetFreq>=POP_REL_MIN_WETFREQ))return sevFromThr(pop,fallbackThr,0);
+  return sevFromThr(pop/wetFreq,POP_REL_THR,0);
+}
 function wetFreqAt(bands,dateKey){
   if(!bands||!bands.wetFreq)return null;
   const v=bands.wetFreq[String(dateKey).slice(5)];
@@ -203,8 +228,8 @@ function sevFromThr(v,t,asc){
   return v<=t[3]?4:v<=t[2]?3:v<=t[1]?2:v<=t[0]?1:0;
 }
 /* v83:617-618 ERC vs area breakpoints */
-function ercSev(v,bp){if(v==null||isNaN(v))return null;if(v>=bp.p97)return 4;if(v>=bp.p90)return 3;if(v>=bp.p80)return 2;if(v>=bp.p80*0.85)return 1;return 0;}
-function ercBand(v,bp){if(v==null||isNaN(v))return "";if(v>=bp.p97)return "≥97th %ile";if(v>=bp.p90)return "90–97th";if(v>=bp.p80)return "80–90th";return "<80th %ile";}
+function ercSev(v,bp){if(v==null||isNaN(v))return null;if(!bp)bp=DEF_BREAKS;if(v>=bp.p97)return 4;if(v>=bp.p90)return 3;if(v>=bp.p80)return 2;if(v>=bp.p80*0.85)return 1;return 0;}
+function ercBand(v,bp){if(v==null||isNaN(v))return "";if(!bp)bp=DEF_BREAKS; /* v114: parity with the dashboard's v93 guard — a half-built area must not throw here */if(v>=bp.p97)return "≥97th %ile";if(v>=bp.p90)return "90–97th";if(v>=bp.p80)return "80–90th";return "<80th %ile";}
 /* v83:921 */ function hainesTerm(delta,c1,c2){if(delta==null)return null;return delta<c1?1:delta<c2?2:3;}
 /* v83:922 — pure already: H is a °C-converted hourly map, i an hour index */
 function hainesAt(H,i,V){
@@ -430,7 +455,7 @@ return {
   HAINES_VAR,HDW_LVLS,HAINES_PL,WX_FIELDS,WX_DIR,COMPASS16,MOD_PHRASE,
   fmBase,bucketOf,confBand,num,
   ercY,kbdiStep,ffwiHour,hdwHour,ramp,gsiDaily,isoDurHours,
-  sevFromThr,bandLadder,windSev,wetFreqAt,ercSev,ercBand,hainesTerm,hainesAt,hainesApplicableFromElev,hainesWeight,
+  sevFromThr,bandLadder,windSev,wetFreqAt,popSevRel,POP_REL_THR,ercSev,ercBand,hainesTerm,hainesAt,hainesApplicableFromElev,hainesWeight,
   compass16,pctlFromQ,normDateKey,
   wxDep,wxSigma,sigTier,devSev,devBasis,
   dryLightning,lalFromPot,lalSev,rfwSev,
