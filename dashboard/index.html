@@ -942,7 +942,7 @@ const OM_MODELS_FULL=["gfs_seamless","ecmwf_ifs025","icon_seamless","gem_seamles
 const OM_MODELS_LEAN=["gfs_seamless","ecmwf_ifs025"];
 function omModels(){return state.ensMode==="full"?OM_MODELS_FULL:OM_MODELS_LEAN;}
 function ensembleLab(){return state.ensMode==="full"?((OM_MODELS_FULL.length+1)+" · full ensemble"):((OM_MODELS_LEAN.length+1)+" · lean (GFS+ECMWF+NWS)");}
-const APP_VERSION="115"; /* PWA — bump together with sw.js CACHE on every release */
+const APP_VERSION="116"; /* PWA — bump together with sw.js CACHE on every release */
 const MAX_RAWS=5; /* v84: station cap per area — API discipline; pickers rank active-first, then nearest */
 const PDS_RE=/particularly\s+dangerous\s+situation/i; /* v84: PDS wording inside a Red Flag Warning — display only */
 /* ==================== v86: narrative pools — driven by / held in check ==================== */
@@ -1725,7 +1725,13 @@ function updateThrPill(){
     +"\nERC breakpoints: "+(erc?"set":"PLACEHOLDER — calibrate or enter FDOP values")
     +"\nFuels percentile ladders (model "+(p.fuelModel||"Y")+"): "+(lad?("set — calibrated "+((p.climo&&p.climo.at)||"?")):"not calibrated for this model — run Calibrate FUELS Indices")
     +"\nHDW percentiles: "+(hdw?("set — entered "+((p.hdwClimo&&p.hdwClimo.at)||"?")):"not set — open HDW forecast \u2197 and enter the two anchors beside the button")
-    +"\nWX normals: "+(p.wxNormals?("set — "+p.wxNormals.at+(p.wxNormals.src==="climo"?" · FPB climo (zone point, means-only — recalibrate locally for σ + your point)":"")):"not set — temp/RH rows fall back to absolute thresholds")+"\nWind/gust bands: "+(p.bands?("percentile scoring active — wind "+(p.bands.windBasis||"?")+" "+((p.bands.windSpan&&(p.bands.windSpan.startY+"–"+p.bands.windSpan.endY))||"?")+" · gust ERA5 "+((p.bands.span&&(p.bands.span.startY+"–"+p.bands.span.endY))||"?")):"none — wind/gust on absolute ladders");}
+    +"\nWX normals: "+(p.wxNormals?("set — "+p.wxNormals.at+(p.wxNormals.src==="climo"?" · FPB climo (zone point, means-only — recalibrate locally for σ + your point)":"")):"not set — temp/RH rows fall back to absolute thresholds")+"\nFuels ladders: "+(p.fuelsClimo
+   ?("zone percentiles \u2014 "+(p.fuelsClimo.region||"?")+" profile, "
+     +(p.fuelsClimo.stations?p.fuelsClimo.stations.map(x=>x.name||x.id).join(" + "):"?")
+     +", "+(p.fuelsClimo.season||"?")+" "+((p.fuelsClimo.span&&(p.fuelsClimo.span.startYear+"\u2013"+p.fuelsClimo.span.endYear))||"")
+     +(Object.keys(p.fuelsClimo.policy||{}).filter(k=>p.fuelsClimo.policy[k].ladder!=="percentile").length
+       ?(" \u00b7 on absolutes: "+Object.keys(p.fuelsClimo.policy).filter(k=>p.fuelsClimo.policy[k].ladder!=="percentile").join(", ")):""))
+   :"none \u2014 national absolute ladders")+"\nWind/gust bands: "+(p.bands?("percentile scoring active — wind "+(p.bands.windBasis||"?")+" "+((p.bands.windSpan&&(p.bands.windSpan.startY+"–"+p.bands.windSpan.endY))||"?")+" · gust ERA5 "+((p.bands.span&&(p.bands.span.startY+"–"+p.bands.span.endY))||"?")):"none — wind/gust on absolute ladders");}
 async function jget(url,opts){const r=await fetch(url,opts||{});if(!r.ok)throw new Error(r.status+" "+url);return r;}
 function isRateErr(e){return /(^|\D)429(\D|$)|too many|rate.?limit|unable to perform query/i.test(String(e&&e.message||e));}
 function coolBtn(id,sec){const b=$(id);if(!b)return;
@@ -3476,6 +3482,91 @@ function compass16(deg){return COMPASS16[Math.round(((deg%360)+360)%360/22.5)%16
    structure as the sigma ladder, so a median day scores sev 2. Fallback chain is
    bands -> absolute E1 thresholds, and the basis used is always reportable. */
 const BAND_LADDER_IDX=[0,1,3,4];
+/* v116: fuels percentile ladders.
+   High-direction rows use the NFDRS shape ercSev has always used — a day at p80
+   scores 2, p90 scores 3, p97 scores 4 — so the whole fuels block finally reads
+   the way ERC already did. Inverted rows (dead fuel moisture: drier is worse)
+   mirror it descending. A row is only laddered if its policy says percentile AND
+   the levels it needs are actually present. */
+const FUEL_HI_LEVELS=["p80","p90","p97"];
+const FUEL_LO_LEVELS=["p50","p20","p10","p3"];
+function fuelsRowsOf(p){
+  p=p||area();const F=p&&p.fuelsClimo;if(!F)return null;
+  const m=(p.fuelModel||"Y");
+  const M=F.models[m]||F.models.Y;
+  return (M&&M.rows)||null;}
+function fuelsPolicyOf(p,id){
+  p=p||area();const F=p&&p.fuelsClimo;
+  return (F&&F.policy&&F.policy[id])||null;}
+function fuelLadder(p,id){
+  const rows=fuelsRowsOf(p);if(!rows)return null;
+  const r=rows[id];if(!r)return null;
+  const pol=fuelsPolicyOf(p,id);
+  if(pol&&pol.ladder!=="percentile")return null;      /* spread or degeneracy disqualified it */
+  if(r.degenerate)return null;
+  if(r.dir==="low"){
+    if(FUEL_LO_LEVELS.some(k=>r[k]==null))return null; /* needs p50/p20/p10/p3 */
+    return {t:FUEL_LO_LEVELS.map(k=>r[k]),asc:0};
+  }
+  if(FUEL_HI_LEVELS.some(k=>r[k]==null))return null;
+  return {t:[r.p80*0.85,r.p80,r.p90,r.p97],asc:1};}
+function fuelSev(id,i,v){
+  if(v==null)return null;
+  const p=area();
+  /* ERC keeps its dedicated path so a LOCAL calibration still outranks the
+     published file — that precedence is the whole point. */
+  if(id==="erc"){
+    const bp=ercBreaksFor(p);
+    return ercSev(v,bp);
+  }
+  const L=fuelLadder(p,id);
+  if(L)return sevFromThr(v,L.t,L.asc);
+  const T0=T(id);
+  return T0?sevFromThr(v,T0.t,T0.asc):null;}
+/* local breaks win; then the published zone file; then national defaults */
+/* v116: DEF_BREAKS carries no marker, so a copied default is byte-identical to a
+   user calibration. Detect it by value (plus the placeholder flag areas get at
+   creation) rather than by a flag that never existed — the same mistake made the
+   v114 "DEFAULT BREAKS" badge silently never fire. */
+function ercBreaksAreDefault(p){
+  p=p||area();const b=p&&p.ercBreaks;
+  if(!b)return true;
+  if(p.breaksPlaceholder||b.def)return true;
+  return b.p80===DEF_BREAKS.p80&&b.p90===DEF_BREAKS.p90&&b.p97===DEF_BREAKS.p97;}
+function ercBreaksFor(p){
+  p=p||area();
+  if(!ercBreaksAreDefault(p))return p.ercBreaks;
+  const rows=fuelsRowsOf(p);
+  const pol=fuelsPolicyOf(p,"erc");
+  if(rows&&rows.erc&&rows.erc.p80!=null&&(!pol||pol.ladder==="percentile"))
+    return {p80:rows.erc.p80,p90:rows.erc.p90,p97:rows.erc.p97,src:"fuels-climo"};
+  return (p&&p.ercBreaks)||DEF_BREAKS;}
+/* where a value sits in the zone's own distribution, for the cell subtext */
+function fuelPctl(id,v){
+  const p=area();const rows=fuelsRowsOf(p);
+  if(!rows||v==null)return null;
+  const r=rows[id];if(!r)return null;
+  const L=[["p3",3],["p10",10],["p20",20],["p50",50],["p80",80],["p90",90],["p97",97]]
+    .filter(x=>r[x[0]]!=null);
+  if(L.length<2)return null;
+  if(v<=L[0][1+0]&&false)return null;
+  const xs=L.map(x=>r[x[0]]),ps=L.map(x=>x[1]);
+  if(v<=xs[0])return ps[0];
+  if(v>=xs[xs.length-1])return ps[ps.length-1];
+  for(let k=0;k<xs.length-1;k++){
+    if(v<=xs[k+1]){const a=xs[k],b=xs[k+1];
+      const f=b>a?(v-a)/(b-a):0;return ps[k]+(ps[k+1]-ps[k])*f;}}
+  return null;}
+function fuelSub(id,v){
+  if(fuelBasis(id)!=="zone")return null;
+  const pc=fuelPctl(id,v);if(pc==null)return null;
+  const r=Math.round(pc);
+  return (r>=97?"\u2265":"~")+r+ordSuffix(r)+" %ile";}
+function fuelBasis(id){
+  const p=area();
+  if(id==="erc"){const b=ercBreaksFor(p);
+    return (b&&b.src==="fuels-climo")?"zone":(ercBreaksAreDefault(p)?"abs":"local");}
+  return fuelLadder(p,id)?"zone":"abs";}
 function bandsOf(p){p=p||area();return (p&&p.bands)||null;}
 function bandFor(id,i){
   const B=bandsOf();if(!B)return null;
@@ -3670,9 +3761,20 @@ function climoSub(id){return (i,r)=>{
   return p==null?null:("p"+Math.round(p));};}
 function fuelRow(id,fmt,subFn){return{
   id:id,val:i=>{const r=fuelField(i,id);let sb=subFn?subFn(i,r):null;
+    if(!sb&&id!=="erc")sb=fuelSub(id,r.v);   /* v116: zone percentile when no other sub */
     if(r.from==="today")sb=(sb?sb+" \u00b7 ":"")+"manual"; /* v90: hand-entered day-0 values are labeled, never disguised as FEMS */
     return{v:r.v,txt:fmt(r.v),from:r.from,sub:sb};},
-  sev:(i,v)=>sevFromThr(v,T(id).t,T(id).asc),w:()=>T(id).w,editable:true};}
+  sev:(i,v)=>fuelSev(id,i,v),w:()=>fuelWeight(id),editable:true};}
+/* v116: the zone's region profile sets the weight when a published file exists —
+   KBDI is drought context in R6 and a driver in R8, and that belongs to the zone,
+   not to a per-device toggle. A locally edited weight still wins. */
+function fuelWeight(id){
+  const p=area();
+  const t=T(id);
+  if(t&&t.wUser)return t.w;
+  const pol=fuelsPolicyOf(p,id);
+  if(pol&&pol.weight!=null)return pol.weight;
+  return t?t.w:0;}
 const ROWS=[
  {grp:"Forecast weather",gnote:"auto · Open-Meteo + NWS"},
  devWrap(Object.assign(simpleAuto("tmax","tmax",r0),{nm:"Max temperature",un:"°F",src:"auto",
@@ -3765,7 +3867,7 @@ const ROWS=[
       sub:(d.mix!=null&&d.tws!=null)?((Math.round(d.mix/100)/10)+"kft × "+Math.round(d.tws*0.868976)+"kt"):null};},
   sev:(i,v)=>sevFromThr(v,T("vi").t,T("vi").asc)},
  {grp:"Fuels & NFDRS — model Y",gnote:"FEMS auto — not a live mirror of the FEMS site (see Method & sources) · click cells to override"},
- Object.assign(fuelRow("erc",r1,(i,r)=>r.v==null?null:ercBand(r.v,area().ercBreaks)),
+ Object.assign(fuelRow("erc",r1,(i,r)=>r.v==null?null:ercBand(r.v,ercBreaksFor(area()))),
    {nm:"Energy Release Component",un:()=>"ERC-"+(area().fuelModel||"Y"),src:"auto",desc:"Energy Release Component (selected NFDRS 2016 fuel model) \u2014 potential heat release in the flaming front; the seasonal fuel-dryness backbone of NFDRS. Scored against this area\u2019s climatological breakpoints (p80/p90/p97).",
     sev:(i,v)=>ercSev(v,area().ercBreaks),w:()=>W_ERC}),
  Object.assign(fuelRow("bi",r0,climoSub("bi")),{nm:"Burning Index",un:()=>"BI-"+(area().fuelModel||"Y"),src:"auto",desc:"Burning Index \u2014 ERC combined with wind; tracks flame-length potential (\u2248 10\u00d7 flame length in feet). v87: scored against this area\u2019s calibrated percentile ladder when present \u2014 same p80/p90/p97 bands as ERC \u2014 so the color always agrees with the percentile shown; falls back to the absolute thresholds table until calibrated.",
@@ -4072,6 +4174,10 @@ function mobInMap(t){for(let e=t;e;e=e.parentElement)if(e.id==="mobMap")return t
 });
 document.addEventListener("dblclick",e=>{if(mobActive()&&!mobInMap(e.target))e.preventDefault();},{passive:false});
 const CLIMO_URLS=[z=>"../climo/"+z+".json",z=>"https://raw.githubusercontent.com/wshendy1-ui/fpb/main/climo/"+z+".json"];
+/* v116: per-zone fuels percentiles, the fuels analogue of the wind bands */
+const FCLIMO_URLS=[z=>"../fuels-climo/"+z+".json",
+  z=>"https://raw.githubusercontent.com/wshendy1-ui/fpb/main/fuels-climo/"+z+".json"];
+const FCLIMO_TRIED={};
 /* v92: Brief shows a fixed, curated set; everything else lives in the Matrix tab */
 const MOB_WX_IDS=["tmax","rhmin","rhrec","wind","gust","precip","pop","dryltg"];
 const MOB_FU_IDS=["erc","bi","fm100","fm1000"];
@@ -4167,7 +4273,29 @@ function climoInstall(p,j){
   }
   if(did)persist();
   return did;}
+/* v116: fetched beside the weather climo, same precedence discipline — never
+   overwrites a local calibration, quiet on 404 (most zones have no file yet). */
+function fuelsClimoInstall(p,j){
+  if(!j||String(j.schema||"").indexOf("fpb-fuels-climo")!==0||!j.models||!j.policy)return false;
+  p.fuelsClimo={schema:j.schema,region:j.region||null,policy:j.policy,models:j.models,
+    span:j.span||null,season:j.season||null,stations:j.stations||null,
+    blend:j.blend||null,at:j.fetched_at||null};
+  persist();return true;}
+function maybeFuelsClimo(p){
+  if(!p||p.fuelsClimo)return;
+  const z=zidOf(p);if(!z||FCLIMO_TRIED[z])return;
+  FCLIMO_TRIED[z]=1;
+  (async()=>{for(const u of FCLIMO_URLS){try{
+      const r=await fetch(u(z),{cache:"no-store"});if(!r.ok)continue;
+      const j=await r.json();
+      if(fuelsClimoInstall(p,j)){
+        toast("Fuels percentiles installed for "+z+" \u2014 "+(j.region||"?")+" profile, "
+          +(j.stations?j.stations.length:"?")+" station"+((j.stations&&j.stations.length===1)?"":"s"));
+        try{renderAll();}catch(e){}}
+      return;}catch(e){}}
+    console.info("fuels-climo: no file for "+z);})();}
 function maybeClimo(p){
+  try{maybeFuelsClimo(p);}catch(e){}
   if(!p)return "no-area";
   if(p.wxNormals&&p.bands)return "has-normals"; /* v113: re-fetch once to pick up bands */
   const z=zidOf(p);if(!z)return "no-zone";
@@ -4352,7 +4480,7 @@ function renderMob(){
       const cell=mobCellHtml(r,si,"inline");fu.push(cell||mobCellRaw(mobName(r),null,mobUn(r),null,null));}
     h+='<div class="mcard"><div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:9px">'
       +'<div class="mkick">Fuels &amp; NFDRS — FM '+mobEsc((p&&p.fuelModel)||"Y")
-      +((p&&p.ercBreaks&&p.ercBreaks.def)?' <span class="mtagx" style="color:#a13c1c;border-color:#a13c1c">DEFAULT BREAKS</span>':'')+'</div>'
+      +((p&&ercBreaksAreDefault(p)&&fuelBasis("erc")!=="zone")?' <span class="mtagx" style="color:#a13c1c;border-color:#a13c1c">DEFAULT BREAKS</span>':'')+'</div>'
       +'<span style="font:600 9px Figtree,sans-serif;letter-spacing:.05em;color:'+((p&&p.femsKind==="avg")?"#a13c1c":"var(--mmut)")+'">'
       +mobEsc(p&&p.femsKind?("FEMS · "+(FEMS_KIND_LAB[p.femsKind]||p.femsKind)):"RAWS · FEMS")+'</span></div>'
       +'<div class="mgrid" id="mobFuGrid">'+fu.join("")+'</div></div>';}
@@ -5992,6 +6120,7 @@ function boot(){
         }
       }catch(e){}
       try{maybeClimo(area());}catch(e){} /* v91: instant zone normals from FPB climatology when uncalibrated */
+      try{maybeFuelsClimo(area());}catch(e){} /* v116: and the zone fuels percentiles */
       refreshWx();              /* data first — failures pill AND toast */
       refreshAlertsOnly();
       try{drawFdra(fd,lat,lon,rad,cands);}catch(eM){console.warn("map draw:",eM);}
